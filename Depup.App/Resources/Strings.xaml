@@ -1,0 +1,23 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <sys:String x:Key="AppName" xmlns:sys="clr-namespace:System;assembly=mscorlib">Depup PDF</sys:String>
+    <sys:String x:Key="MenuLabel" xmlns:sys="clr-namespace:System;assembly=mscorlib">MENU UTAMA</sys:String>
+    <sys:String x:Key="QuickScanLabel" xmlns:sys="clr-namespace:System;assembly=mscorlib">Scan Cepat</sys:String>
+    <sys:String x:Key="ReadLabel" xmlns:sys="clr-namespace:System;assembly=mscorlib">Baca</sys:String>
+    <sys:String x:Key="ToolsLabel" xmlns:sys="clr-namespace:System;assembly=mscorlib">Tools</sys:String>
+    <sys:String x:Key="CreateLabel" xmlns:sys="clr-namespace:System;assembly=mscorlib">Buat</sys:String>
+    <sys:String x:Key="SaveLabel" xmlns:sys="clr-namespace:System;assembly=mscorlib">Simpan</sys:String>
+    <sys:String x:Key="OfflineLabel" xmlns:sys="clr-namespace:System;assembly=mscorlib">100% Offline</sys:String>
+    <sys:String x:Key="SearchHint" xmlns:sys="clr-namespace:System;assembly=mscorlib">Cari di Depup PDF</sys:String>
+    <sys:String x:Key="NotificationsLabel" xmlns:sys="clr-namespace:System;assembly=mscorlib">Notifikasi</sys:String>
+    <sys:String x:Key="ProfileLabel" xmlns:sys="clr-namespace:System;assembly=mscorlib">Profil pengguna</sys:String>
+    <sys:String x:Key="ReadyStatus" xmlns:sys="clr-namespace:System;assembly=mscorlib">Siap bekerja offline</sys:String>
+    <sys:String x:Key="EmptyReadTitle" xmlns:sys="clr-namespace:System;assembly=mscorlib">Belum ada berkas terbaru</sys:String>
+    <sys:String x:Key="EmptyReadDescription" xmlns:sys="clr-namespace:System;assembly=mscorlib">Berkas yang Anda buka akan tampil di sini. Seret berkas ke jendela untuk memulai.</sys:String>
+    <sys:String x:Key="EmptyToolsTitle" xmlns:sys="clr-namespace:System;assembly=mscorlib">Alat PDF tersedia di sini</sys:String>
+    <sys:String x:Key="EmptyToolsDescription" xmlns:sys="clr-namespace:System;assembly=mscorlib">Pilih fitur untuk mengolah dokumen secara lokal. Fitur akan muncul saat tahap implementasinya tersedia.</sys:String>
+    <sys:String x:Key="EmptyCreateTitle" xmlns:sys="clr-namespace:System;assembly=mscorlib">Ruang kreasi dokumen</sys:String>
+    <sys:String x:Key="EmptyCreateDescription" xmlns:sys="clr-namespace:System;assembly=mscorlib">Pembuatan dokumen dan pemindaian akan tersedia di tahap berikutnya.</sys:String>
+    <sys:String x:Key="EmptySaveTitle" xmlns:sys="clr-namespace:System;assembly=mscorlib">Penyimpanan lokal</sys:String>
+    <sys:String x:Key="EmptySaveDescription" xmlns:sys="clr-namespace:System;assembly=mscorlib">Riwayat, folder, dan Vault akan ditampilkan di sini setelah fiturnya diimplementasikan.</sys:String>
+</ResourceDictionary>

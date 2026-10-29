@@ -1,0 +1,25 @@
+<Application x:Class="Depup.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="clr-namespace:Depup.App.Converters"
+             xmlns:vm="clr-namespace:Depup.App.ViewModels"
+             xmlns:views="clr-namespace:Depup.App.Views">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Depup.App;component/Resources/Colors.xaml" />
+                <ResourceDictionary Source="/Depup.App;component/Resources/Brushes.xaml" />
+                <ResourceDictionary Source="/Depup.App;component/Resources/Typography.xaml" />
+                <ResourceDictionary Source="/Depup.App;component/Resources/Icons.xaml" />
+                <ResourceDictionary Source="/Depup.App;component/Resources/Styles.xaml" />
+                <ResourceDictionary Source="/Depup.App;component/Resources/Strings.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <conv:BooleanToGridLengthConverter x:Key="BooleanToGridLength" />
+            <conv:ZeroToVisibilityConverter x:Key="ZeroToVisibilityConverter" />
+            <DataTemplate DataType="{x:Type vm:ReadPageViewModel}"><views:ReadPage /></DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ToolsPageViewModel}"><views:ToolsPage /></DataTemplate>
+            <DataTemplate DataType="{x:Type vm:CreatePageViewModel}"><views:CreatePage /></DataTemplate>
+            <DataTemplate DataType="{x:Type vm:SavePageViewModel}"><views:SavePage /></DataTemplate>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

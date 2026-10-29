@@ -1,0 +1,12 @@
+<UserControl x:Class="Depup.App.Views.CreatePage" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel>
+        <TextBlock Text="Buat Dokumen Baru" Style="{StaticResource DisplayText}" />
+        <TextBlock Text="Ruang untuk membuat dokumen dan memindai berkas." Style="{StaticResource MutedText}" Margin="0,8,0,24" />
+        <Border Style="{StaticResource EmptyStateCardStyle}" MinHeight="220">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="480">
+                <TextBlock Text="Ruang kreasi dokumen" Style="{StaticResource Heading2}" HorizontalAlignment="Center" TextAlignment="Center" />
+                <TextBlock Text="Studio scan, dokumen Word, dan spreadsheet akan tersedia saat fitur pembuatannya diimplementasikan." Style="{StaticResource MutedText}" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" Margin="0,10,0,0" />
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

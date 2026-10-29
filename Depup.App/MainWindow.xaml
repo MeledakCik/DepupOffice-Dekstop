@@ -1,0 +1,80 @@
+<Window x:Class="Depup.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:Depup.App.ViewModels"
+        mc:Ignorable="d"
+        Title="Depup PDF"
+        x:Name="RootWindow"
+        MinWidth="900" MinHeight="600"
+        Width="1280" Height="800"
+        Background="{StaticResource CanvasBrush}"
+        Foreground="{StaticResource TextBrush}"
+        AllowDrop="True">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="{Binding IsNavigationCollapsed, Converter={StaticResource BooleanToGridLength}}" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0" Padding="12,18">
+            <DockPanel>
+                <Button DockPanel.Dock="Top" Command="{Binding ToggleNavigationCommand}" Style="{StaticResource SecondaryButton}" ToolTip="Ciutkan navigasi (Ctrl+B)" AutomationProperties.Name="Ciutkan atau lebarkan navigasi" Height="42" Padding="8">
+                    <Path Data="{StaticResource MenuIcon}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="2" Stretch="Uniform" Width="20" Height="20" />
+                </Button>
+                <Button DockPanel.Dock="Top" Command="{Binding QuickScanCommand}" Style="{StaticResource PrimaryButton}" Margin="0,14,0,24" Height="48" ToolTip="Mulai Scan Cepat">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Path Data="{StaticResource ScanIcon}" Stroke="White" StrokeThickness="2" Stretch="Uniform" Width="20" Height="20" Margin="0,0,8,0" />
+                        <TextBlock Text="Scan Cepat" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <StackPanel>
+                    <TextBlock Text="MENU UTAMA" Style="{StaticResource MutedText}" FontSize="10" Margin="8,0,0,10" />
+                    <Button Command="{Binding NavigateCommand}" CommandParameter="Baca" Style="{StaticResource NavButtonStyle}" ToolTip="Baca" AutomationProperties.Name="Baca">
+                        <StackPanel Orientation="Horizontal"><Path Data="{StaticResource ReadIcon}" Style="{StaticResource IconStyle}" /><TextBlock Text="{DynamicResource ReadLabel}"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding IsNavigationCollapsed, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel>
+                    </Button>
+                    <Button Command="{Binding NavigateCommand}" CommandParameter="Tools" Style="{StaticResource NavButtonStyle}" ToolTip="Tools PDF" AutomationProperties.Name="Tools">
+                        <StackPanel Orientation="Horizontal"><Path Data="{StaticResource ToolsIcon}" Style="{StaticResource IconStyle}" /><TextBlock Text="{DynamicResource ToolsLabel}"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding IsNavigationCollapsed, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel>
+                    </Button>
+                    <Button Command="{Binding NavigateCommand}" CommandParameter="Buat" Style="{StaticResource NavButtonStyle}" ToolTip="Buat dokumen" AutomationProperties.Name="Buat">
+                        <StackPanel Orientation="Horizontal"><Path Data="{StaticResource CreateIcon}" Style="{StaticResource IconStyle}" /><TextBlock Text="{DynamicResource CreateLabel}"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding IsNavigationCollapsed, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel>
+                    </Button>
+                    <Button Command="{Binding NavigateCommand}" CommandParameter="Simpan" Style="{StaticResource NavButtonStyle}" ToolTip="Simpan dan Vault" AutomationProperties.Name="Simpan">
+                        <StackPanel Orientation="Horizontal"><Path Data="{StaticResource SaveIcon}" Style="{StaticResource IconStyle}" /><TextBlock Text="{DynamicResource SaveLabel}"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding IsNavigationCollapsed, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel>
+                    </Button>
+                </StackPanel>
+                <Border DockPanel.Dock="Bottom" Style="{StaticResource ChipStyle}" Margin="0,20,0,0">
+                    <StackPanel Orientation="Horizontal"><Ellipse Width="8" Height="8" Fill="{StaticResource TertiaryBrush}" Margin="0,0,8,0" /><TextBlock Text="{DynamicResource OfflineLabel}" Style="{StaticResource MutedText}" FontSize="11" /></StackPanel>
+                </Border>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions><RowDefinition Height="76" /><RowDefinition Height="*" /><RowDefinition Height="30" /></Grid.RowDefinitions>
+            <Border Grid.Row="0" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="28,14">
+                <Grid>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding CurrentPage.Title}" Style="{StaticResource Heading2}" />
+                        <TextBlock Text="{Binding CurrentPage.Subtitle}" Style="{StaticResource MutedText}" FontSize="11" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Button Content="Buka" Command="{Binding ReadPage.PickAndOpenCommand}" Style="{StaticResource SecondaryButton}" Margin="0,0,10,0" />
+                        <Border Width="260" Height="40" Style="{StaticResource SearchBarBorderStyle}" Margin="0,0,14,0">
+                            <Grid>
+                                <Path Data="{StaticResource SearchIcon}" Stroke="{StaticResource MutedTextBrush}" StrokeThickness="2" Stretch="Uniform" Width="18" Height="18" HorizontalAlignment="Left" Margin="12,0,0,0" />
+                                <TextBox x:Name="GlobalSearch" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBar}" BorderThickness="0" Padding="38,8,8,8" ToolTip="{DynamicResource SearchHint}" AutomationProperties.Name="{DynamicResource SearchHint}" />
+                            </Grid>
+                        </Border>
+                        <Button Style="{StaticResource IconButtonStyle}" ToolTip="Notifikasi" AutomationProperties.Name="{DynamicResource NotificationsLabel}"><Path Data="{StaticResource BellIcon}" Style="{StaticResource IconStyle}" /></Button>
+                        <Border Width="38" Height="38" CornerRadius="19" Background="{StaticResource PrimaryBrush}" Margin="12,0,0,0" ToolTip="{DynamicResource ProfileLabel}" AutomationProperties.Name="{DynamicResource ProfileLabel}"><TextBlock Text="DP" Foreground="White" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <ScrollViewer Grid.Row="1" Padding="28,24" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" AllowDrop="True">
+                <ContentControl Content="{Binding CurrentPage}" />
+            </ScrollViewer>
+            <Border Grid.Row="2" Background="{StaticResource CanvasBrush}" Padding="28,5"><TextBlock Text="{Binding StatusMessage}" Style="{StaticResource MutedText}" FontSize="11" /></Border>
+        </Grid>
+    </Grid>
+</Window>

@@ -1,0 +1,23 @@
+<Window x:Class="Depup.App.Views.DocumentViewer"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Pembaca Dokumen" Width="1000" Height="720" MinWidth="720" MinHeight="480"
+        Background="{StaticResource CanvasBrush}">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="DocumentTitle" Style="{StaticResource Heading2}" Margin="0,0,0,16" TextTrimming="CharacterEllipsis" />
+        <Grid Grid.Row="1">
+            <wv2:WebView2 x:Name="PdfView" Visibility="Collapsed" />
+            <TabControl x:Name="SheetTabs" Visibility="Collapsed" SelectionChanged="OnSheetSelectionChanged">
+                <TabControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" /></DataTemplate></TabControl.ItemTemplate>
+            </TabControl>
+            <DataGrid x:Name="TableView" Visibility="Collapsed" IsReadOnly="True" AutoGenerateColumns="True" CanUserAddRows="False" />
+            <TextBox x:Name="TextView" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Padding="18" />
+            <TextBlock x:Name="ErrorText" Visibility="Collapsed" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" VerticalAlignment="Center" HorizontalAlignment="Center" />
+        </Grid>
+    </Grid>
+</Window>
