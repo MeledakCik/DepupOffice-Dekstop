@@ -347,15 +347,10 @@ namespace DepupOfficeDesktop.Controls
                     g.DrawLine(pen, P(5, 9), P(10, 9));
                     g.DrawLine(pen, P(5, 12), P(9, 12));
                     break;
-                case NavItemIcon.Scan:
-                    g.DrawLine(pen, P(2, 6), P(2, 2));
-                    g.DrawLine(pen, P(2, 2), P(6, 2));
-                    g.DrawLine(pen, P(10, 2), P(14, 2));
-                    g.DrawLine(pen, P(14, 2), P(14, 6));
-                    g.DrawLine(pen, P(2, 10), P(2, 14));
-                    g.DrawLine(pen, P(2, 14), P(6, 14));
-                    g.DrawLine(pen, P(10, 14), P(14, 14));
-                    g.DrawLine(pen, P(14, 10), P(14, 14));
+                case NavItemIcon.Scan: // ikon "Buat": kotak dengan tanda plus
+                    g.DrawRectangle(pen, x + 2 * scale, y + 2 * scale, 12 * scale, 12 * scale);
+                    g.DrawLine(pen, P(8, 5), P(8, 11));
+                    g.DrawLine(pen, P(5, 8), P(11, 8));
                     break;
                 case NavItemIcon.Vault:
                     g.DrawRectangle(pen, x + 2 * scale, y + 3 * scale, 12 * scale, 10 * scale);

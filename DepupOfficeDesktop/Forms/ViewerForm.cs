@@ -154,9 +154,11 @@ namespace DepupOfficeDesktop.Forms
             var btnPrint = Act("🖨️ Cetak", false, Theme.ACCENT, PrintCurrentDocument);
             var btnSign = Act("✍️ Tanda Tangan PDF", false, Theme.TEAL, ShowSignDialog);
             btnSign.Visible = _isPdf && _pdfPages.Count > 0;
+            var btnEdit = Act("✏️ Edit PDF", true, Theme.ACCENT, EditThisPdf);
+            btnEdit.Visible = _isPdf && _pdfPages.Count > 0;
             Button? btnMore = null;
             btnMore = Act("⋮ Lainnya", false, Theme.TEXT, () => ShowMoreMenu(btnMore!));
-            actions.Controls.AddRange(new Control[] { _btnTheme, _btnBookmark, btnVoice, btnPrint, btnSign, btnMore });
+            actions.Controls.AddRange(new Control[] { _btnTheme, _btnBookmark, btnVoice, btnPrint, btnEdit, btnSign, btnMore });
 
             // ---- Baris 3: status tema/zoom + navigasi halaman ----
             var statusBar = new FlowLayoutPanel
@@ -580,6 +582,15 @@ namespace DepupOfficeDesktop.Forms
                 string txt = File.Exists(_filePath) ? File.ReadAllText(_filePath) : _fileName;
                 PrintHelper.PrintText(DlgOwner, _fileName, txt);
             }
+        }
+
+        private void EditThisPdf()
+        {
+            using var editor = new PdfEditorForm(_filePath);
+            if (!editor.Ready) return;
+            editor.ShowDialog(DlgOwner);
+            if (!string.IsNullOrWhiteSpace(editor.SavedPath))
+                Theme.Toast(DlgOwner, $"Hasil edit tersimpan: {Path.GetFileName(editor.SavedPath)}");
         }
 
         private void ShowSignDialog()

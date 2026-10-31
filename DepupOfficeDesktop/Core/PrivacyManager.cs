@@ -114,7 +114,7 @@ namespace DepupOfficeDesktop.Core
     <ul>
       <li>Pembaca &amp; Pengolah PDF (Gabung, Pisah, Kompres Target SSCASN/CPNS, Susun Halaman, Tanda Tangan Digital).</li>
       <li>Editor Dokumen Microsoft Word (<code>.docx</code>) dan Spreadsheet Microsoft Excel (<code>.xlsx</code> / <code>.csv</code>).</li>
-      <li>Smart Scanner, Auto-Crop AI, Pelurusan Teks (Deskew), Tata KTP 2-Sisi A4, Sensur Hitam (Redaksi NIK), dan Cap Watermark.</li>
+      <li>Editor PDF (ubah teks, sisip gambar & tanda tangan, sorot, tutup bagian), Gabung/Pisah/Kompres PDF, dan Brankas terenkripsi.</li>
       <li>Pengenalan Teks Offline (OCR), Pembaca Suara Dokumen (Offline Voice Reader / SAPI TTS), dan Pembuat/Pemindai Kode QR.</li>
       <li>Brankas Pribadi Terenkripsi <strong>AES-256-GCM</strong> yang dikunci dengan PIN lokal di perangkat Anda.</li>
     </ul>

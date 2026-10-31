@@ -48,7 +48,7 @@ namespace DepupOfficeDesktop.Forms
             // Skala DPI harus ditetapkan sebelum satu pun kontrol dibuat.
             Theme.SetDpi(DeviceDpi);
 
-            Text = "Depup Office Desktop v2.2.0 — 100% Offline Document, PDF, Scanner & Vault Suite";
+            Text = "Depup Office Desktop v2.2.0 — 100% Offline Document, PDF Editor & Vault Suite";
             var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
             Size = new Size(Math.Min(Theme.S(1280), (int)(workArea.Width * 0.92)), Math.Min(Theme.S(840), (int)(workArea.Height * 0.92)));
             MinimumSize = new Size(Math.Min(Theme.S(940), workArea.Width), Math.Min(Theme.S(640), workArea.Height));
@@ -339,84 +339,26 @@ namespace DepupOfficeDesktop.Forms
             dlg.ShowDialog(this);
         }
 
-        private void StartSmartScanFlow()
-        {
-            using var dlg = new Form
-            {
-                Text = "Smart Scanner & Kamera — Depup Office Desktop",
-                Size = new Size(500, 290),
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                BackColor = Color.White
-            };
-
-            dlg.Controls.Add(new Label
-            {
-                Text = "Pilih Sumber Pemindaian Dokumen",
-                Font = Theme.FontHead(13f),
-                ForeColor = Theme.TEXT,
-                Location = new Point(22, 18),
-                AutoSize = true
-            });
-            dlg.Controls.Add(new Label
-            {
-                Text = "Impor foto dokumen/KTP/struk dari komputer atau buka pratinjau sampel pindai kamera cerdas dengan Auto-Crop AI & OCR.",
-                Font = Theme.FontBody(9.5f),
-                ForeColor = Theme.MUTED,
-                Location = new Point(22, 48),
-                Size = new Size(440, 42)
-            });
-
-            var btnImport = Theme.CreateButton("🖼️ Pilih Foto Dokumen / KTP dari Komputer...", true, Theme.ACCENT, 44, 440);
-            btnImport.Location = new Point(22, 102);
-            btnImport.Click += (s, e) =>
-            {
-                dlg.Close();
-                ImportPhotosToScannerFlow();
-            };
-
-            var btnSimulated = Theme.CreateButton("📷 Buka Kamera / Sampel Dokumen Cerdas (Demo Instan)", false, Theme.TEAL, 44, 440);
-            btnSimulated.Location = new Point(22, 158);
-            btnSimulated.Click += (s, e) =>
-            {
-                dlg.Close();
-                LaunchScanEditor(Array.Empty<string>());
-            };
-
-            dlg.Controls.AddRange(new Control[] { btnImport, btnSimulated });
-            dlg.ShowDialog(this);
-        }
-
-        private void ImportPhotosToScannerFlow()
+        private void StartPdfEditorFlow()
         {
             using var ofd = new OpenFileDialog
             {
-                Title = "Pilih 1 atau Lebih Foto Dokumen / KTP / Struk",
-                Multiselect = true,
-                Filter = "Gambar (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp"
+                Title = "Pilih PDF atau Gambar untuk Diedit",
+                Filter = "PDF / Gambar (*.pdf;*.jpg;*.jpeg;*.png;*.bmp)|*.pdf;*.jpg;*.jpeg;*.png;*.bmp"
             };
-            if (ofd.ShowDialog(this) == DialogResult.OK && ofd.FileNames.Length > 0)
-            {
-                LaunchScanEditor(ofd.FileNames);
-            }
+            if (ofd.ShowDialog(this) == DialogResult.OK)
+                OpenPdfEditor(ofd.FileName);
         }
 
-        private void LaunchScanEditor(IEnumerable<string> files)
+        internal void OpenPdfEditor(string path)
         {
-            using var editor = new ScanEditForm(files);
-            if (editor.ShowDialog(this) == DialogResult.OK)
+            using var editor = new PdfEditorForm(path);
+            if (!editor.Ready) return;
+            editor.ShowDialog(this);
+            if (!string.IsNullOrWhiteSpace(editor.SavedPath) && File.Exists(editor.SavedPath))
             {
-                if (!string.IsNullOrWhiteSpace(editor.OutputFilePath) && File.Exists(editor.OutputFilePath))
-                {
-                    ShowOperationResultDialog("Scan & Ekspor Selesai", editor.OutputFilePath);
-                }
-                else if (editor.OutputJpgCount > 0)
-                {
-                    MessageBox.Show(this, $"✓ {editor.OutputJpgCount} gambar hasil scan disimpan di:\n{AppStorage.PicturesDir}", "Simpan JPG Selesai", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
                 RenderCurrentTab();
+                ShowOperationResultDialog("PDF Hasil Edit Tersimpan", editor.SavedPath);
             }
         }
 

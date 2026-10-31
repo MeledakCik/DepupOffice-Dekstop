@@ -10,10 +10,10 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>DepupOffice</AssemblyName>
     <RootNamespace>DepupOfficeDesktop</RootNamespace>
-    <Version>2.2.0</Version>
+    <Version>2.3.0</Version>
     <Company>Depup Cloud</Company>
-    <Product>Depup Office Desktop v2.2.0</Product>
-    <Description>Depup Office Desktop v2.2.0 - FREE, 100% Offline, Zero Cloud Upload. Donasi sukarela via https://saweria.co/depupdonate (tidak membuka fitur premium, diproses di luar aplikasi)</Description>
+    <Product>Depup Office Desktop v2.3.0</Product>
+    <Description>Depup Office Desktop v2.3.0 - FREE, 100% Offline, Zero Cloud Upload. Donasi sukarela via https://saweria.co/depupdonate (tidak membuka fitur premium, diproses di luar aplikasi)</Description>
   </PropertyGroup>
 
   <ItemGroup>

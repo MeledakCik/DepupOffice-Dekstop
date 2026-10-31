@@ -64,14 +64,14 @@ namespace DepupOfficeDesktop.Forms
 
             var brand = new Panel { Dock = DockStyle.Top, Height = S(128), BackColor = Theme.SURFACE };
             brand.Controls.Add(L("Depup Office", Theme.FontHead(15f), Theme.ACCENT, S(24), S(24)));
-            var btnScan = Theme.CreateButton("▦  Smart Scan", true, Theme.ACCENT, S(44), innerW);
-            btnScan.Location = new Point(S(16), S(70));
-            btnScan.Click += (s, e) => StartSmartScanFlow();
-            brand.Controls.Add(btnScan);
+            var btnEditPdf = Theme.CreateButton("✎  Edit PDF", true, Theme.ACCENT, S(44), innerW);
+            btnEditPdf.Location = new Point(S(16), S(70));
+            btnEditPdf.Click += (s, e) => StartPdfEditorFlow();
+            brand.Controls.Add(btnEditPdf);
 
             // Menu utama (Dock=Top ditumpuk terbalik, jadi ditambahkan dari bawah ke atas)
             var nav = new Panel { Dock = DockStyle.Fill, BackColor = Theme.SURFACE, Padding = new Padding(S(16), S(4), S(16), 0) };
-            string[] navNames = { "Baca", "Tools PDF", "Buat Scan", "Simpan" };
+            string[] navNames = { "Baca", "Tools PDF", "Buat", "Simpan" };
             NavItemIcon[] navIcons = { NavItemIcon.Book, NavItemIcon.Pdf, NavItemIcon.Scan, NavItemIcon.Vault };
             for (int i = navNames.Length - 1; i >= 0; i--)
             {
@@ -468,7 +468,7 @@ namespace DepupOfficeDesktop.Forms
 
             p.Controls.Add(CreateHeading(w, Greeting(), "Ruang Baca Berkas"));
 
-            // Kartu hero Smart Scan
+            // Kartu hero Editor PDF
             bool stacked = w < S(760);
             var hero = new CardPanel
             {
@@ -484,18 +484,18 @@ namespace DepupOfficeDesktop.Forms
             int textW = stacked ? w - S(48) : w - S(48) - btnW - S(24);
             hero.Controls.Add(new Pill
             {
-                Text = "SMART SCANNER • OCR OFFLINE",
+                Text = "EDITOR PDF • 100% OFFLINE",
                 Fg = Color.White,
                 Bg = Color.FromArgb(56, 255, 255, 255),
                 Location = new Point(S(24), S(18))
             });
-            hero.Controls.Add(L("Pindai & Olah Dokumen Fisik Jadi PDF / Word", Theme.FontHead(15f), Color.White, S(24), S(50), textW, S(30), true));
-            hero.Controls.Add(L("Multi-halaman, Auto-Crop AI, luruskan otomatis, filter B&W Dokumen, KTP 2-sisi dalam 1 lembar A4.",
+            hero.Controls.Add(L("Edit PDF Seperti di Word", Theme.FontHead(15f), Color.White, S(24), S(50), textW, S(30), true));
+            hero.Controls.Add(L("Ubah teks asli, tambah teks baru, gambar & tanda tangan, sorot atau tutup bagian, lalu simpan sebagai PDF baru.",
                 Theme.FontBody(9.5f), Color.FromArgb(235, 255, 255, 255), S(24), S(86), textW, S(44), true));
-            var btnHero = Theme.CreateButton("Buka Studio", true, Color.White, S(42), btnW);
+            var btnHero = Theme.CreateButton("Buka Editor", true, Color.White, S(42), btnW);
             btnHero.ForeColor = Theme.ACCENT;
             btnHero.Location = stacked ? new Point(S(24), S(150)) : new Point(w - btnW - S(24), (hero.Height - S(42)) / 2);
-            btnHero.Click += (s, e) => StartSmartScanFlow();
+            btnHero.Click += (s, e) => StartPdfEditorFlow();
             hero.Controls.Add(btnHero);
             p.Controls.Add(hero);
 
@@ -827,7 +827,7 @@ namespace DepupOfficeDesktop.Forms
                 tw => CreateFeatureTile(tw, "Susun & Hapus PDF", "Atur urutan, putar 90°, atau buang halaman", "Baru", Theme.ACCENT, Theme.BLUE_BG, OrganizePdfFlow),
                 tw => CreateFeatureTile(tw, "Sedot Foto PDF", "Ekstrak seluruh gambar halaman PDF ke Documents\\DepupOffice\\Gambar", "JPG", Theme.INDIGO, Theme.INDIGO_BG, ExtractPdfImagesFlow),
                 tw => CreateFeatureTile(tw, "Kompres PDF", "Kompres presisi <200KB, <500KB, <1MB (CPNS)", "Hemat 80%", Theme.TEAL, Theme.TEAL_BG, CompressPdfFlow),
-                tw => CreateFeatureTile(tw, "Scan Struk & Nota", "Pindai nota belanja & ekstrak total ke Excel", "AI OCR", Theme.TEAL, Theme.TEAL_BG, StartSmartScanFlow),
+                tw => CreateFeatureTile(tw, "Edit PDF", "Ubah teks, sisipkan gambar & tanda tangan seperti di Word", "Baru", Theme.ACCENT, Theme.BLUE_BG, StartPdfEditorFlow),
                 tw => CreateFeatureTile(tw, "Konversi Massal", "Ubah banyak foto sekaligus jadi PDF terpisah", "Batch", Theme.INDIGO, Theme.INDIGO_BG, BatchImagesToPdfFlow),
                 tw => CreateFeatureTile(tw, "Kompres Foto", "Kecilkan ukuran foto sebelum dikirim WA/Email", "Hemat", Theme.TEAL, Theme.TEAL_BG, CompressGalleryImagesFlow),
                 tw => CreateFeatureTile(tw, "Pindai & Buat QR", "Pindai QR/Barcode dari gambar atau buat QR ISO", "QR ISO", Theme.TEAL, Theme.TEAL_BG, ShowQrManagerDialog),
@@ -863,9 +863,9 @@ namespace DepupOfficeDesktop.Forms
             int w = GetContentWidth();
 
             p.Controls.Add(CreateHeading(w, "Studio kreasi PDF & dokumen Office", "Buat Dokumen Baru",
-                "Pindai dokumen fisik, tulis surat/kontrak di Word, olah tabel rumus di Excel, atau bubuhkan tanda tangan resmi."));
+                "Edit PDF seperti di Word, tulis surat/kontrak, olah tabel rumus di Excel, atau bubuhkan tanda tangan resmi."));
 
-            // Hero scan
+            // Hero editor PDF
             bool narrow = w < S(780);
             int btnW = S(270);
             var hero = new CardPanel
@@ -880,23 +880,23 @@ namespace DepupOfficeDesktop.Forms
             };
             hero.Controls.Add(new Pill
             {
-                Text = "PALING POPULER • SMART CAMERA & IMAGE SCANNER",
+                Text = "PALING POPULER • EDITOR PDF OFFLINE",
                 Fg = Theme.TEAL,
                 Bg = ColorTranslator.FromHtml("#CCFBF1"),
                 Location = new Point(S(24), S(18))
             });
-            hero.Controls.Add(L("Scan Dokumen & KTP Jadi PDF / Word", Theme.FontHead(15f), Color.White, S(24), S(50), w - S(48), S(30), true));
+            hero.Controls.Add(L("Edit PDF Seperti di Word", Theme.FontHead(15f), Color.White, S(24), S(50), w - S(48), S(30), true));
 
             int frameW = narrow ? w - S(48) : Math.Min(S(480), w - S(48) - btnW - S(24));
-            hero.Controls.Add(new ScanFrameHeroControl { Location = new Point(S(24), S(90)), Size = new Size(Math.Max(S(160), frameW), S(90)) });
+            hero.Controls.Add(L("Klik teks asli untuk mengubahnya, tambah teks baru, gambar, tanda tangan, sorotan, atau tutup bagian yang ingin dihapus.", Theme.FontBody(9.5f), Color.FromArgb(235, 255, 255, 255), S(24), S(90), Math.Max(S(160), frameW), S(70), true));
 
-            var btnStart = Theme.CreateButton("Buka Studio Smart Scan", true, Color.White, S(44), narrow ? Math.Min(btnW, w - S(48)) : btnW);
+            var btnStart = Theme.CreateButton("Buka Editor PDF", true, Color.White, S(44), narrow ? Math.Min(btnW, w - S(48)) : btnW);
             btnStart.ForeColor = Theme.ACCENT;
-            btnStart.Click += (s, e) => StartSmartScanFlow();
-            var btnImport = Theme.CreateButton("Impor Foto dari Komputer", false, Color.White, S(42), narrow ? Math.Min(btnW, w - S(48)) : btnW);
+            btnStart.Click += (s, e) => StartPdfEditorFlow();
+            var btnImport = Theme.CreateButton("Buat PDF dari Teks", false, Color.White, S(42), narrow ? Math.Min(btnW, w - S(48)) : btnW);
             btnImport.BackColor = Color.FromArgb(255, 255, 255);
             btnImport.ForeColor = Theme.ACCENT;
-            btnImport.Click += (s, e) => ImportPhotosToScannerFlow();
+            btnImport.Click += (s, e) => QuickTextToPdfDialog();
             if (narrow)
             {
                 btnStart.Location = new Point(S(24), S(196));
