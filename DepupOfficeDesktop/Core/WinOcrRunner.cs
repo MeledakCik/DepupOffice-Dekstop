@@ -51,11 +51,14 @@ namespace DepupOfficeDesktop.Core
         }
 
         /// <summary>Jalankan OCR. Melempar exception berisi pesan yang ramah pengguna bila gagal.</summary>
-        public static OcrPage Recognize(Bitmap src)
+        public static OcrPage Recognize(Bitmap src) => RecognizeWithWords(src).page;
+
+        /// <summary>Seperti <see cref="Recognize"/>, plus kotak tiap KATA (dipakai Tabel → Excel).</summary>
+        public static (OcrPage page, List<OcrLine> words) RecognizeWithWords(Bitmap src)
         {
             int origW = src.Width, origH = src.Height;
             if (origW < 40 || origH < 40)
-                return new OcrPage("", new List<string>(), new List<OcrLine>(), origW, origH);
+                return (new OcrPage("", new List<string>(), new List<OcrLine>(), origW, origH), new List<OcrLine>());
 
             // Mesin OCR Windows membatasi dimensi gambar; kecilkan bila perlu lalu skala balik kotaknya.
             double maxDim = 2600;
@@ -88,7 +91,7 @@ namespace DepupOfficeDesktop.Core
             return Task.Run(() => RecognizeCore(png, scale, origW, origH)).GetAwaiter().GetResult();
         }
 
-        private static OcrPage RecognizeCore(byte[] png, double scale, int origW, int origH)
+        private static (OcrPage, List<OcrLine>) RecognizeCore(byte[] png, double scale, int origW, int origH)
         {
             var engine = GetEngine()
                 ?? throw new InvalidOperationException(
@@ -105,6 +108,7 @@ namespace DepupOfficeDesktop.Core
             var result = engine.RecognizeAsync(softBmp).AsTask().GetAwaiter().GetResult();
 
             var lines = new List<OcrLine>();
+            var words = new List<OcrLine>();
             var texts = new List<string>();
             var paras = new List<string>();
             var cur = new List<string>();
@@ -127,6 +131,12 @@ namespace DepupOfficeDesktop.Core
                 }
 
                 double inv = scale > 0 ? 1.0 / scale : 1.0;
+                foreach (var word in line.Words)
+                {
+                    var r = word.BoundingRect;
+                    words.Add(new OcrLine(word.Text ?? "", new Rectangle((int)Math.Round(r.X * inv), (int)Math.Round(r.Y * inv),
+                        Math.Max(1, (int)Math.Round(r.Width * inv)), Math.Max(1, (int)Math.Round(r.Height * inv)))));
+                }
                 var box = new Rectangle(
                     (int)Math.Round(left * inv),
                     (int)Math.Round(top * inv),
@@ -147,7 +157,7 @@ namespace DepupOfficeDesktop.Core
             }
             if (cur.Count > 0) paras.Add(string.Join(" ", cur));
 
-            return new OcrPage(string.Join("\n", texts), paras, lines, origW, origH);
+            return (new OcrPage(string.Join("\n", texts), paras, lines, origW, origH), words);
         }
     }
 }

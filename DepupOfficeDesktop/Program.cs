@@ -12,6 +12,7 @@ namespace DepupOfficeDesktop
         {
             ApplicationConfiguration.Initialize();
             AppStorage.Initialize();
+            ProtectedDoc.CleanupLeftovers();   // salinan terdekripsi yang tertinggal (aplikasi ditutup paksa)
 
             string? initialFile = null;
             if (args.Length > 0)

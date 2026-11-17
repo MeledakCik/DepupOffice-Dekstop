@@ -10,14 +10,27 @@ using DepupOfficeDesktop.Core;
 
 namespace DepupOfficeDesktop.Forms
 {
+    /// <summary>Opsi Reader: mode aman Dokumen Terlindungi (tangkapan layar diblokir, izin cetak/salin/ekspor).</summary>
+    public sealed class ViewerOptions
+    {
+        public bool Secure;
+        public string? DisplayName;
+        public bool AllowPrint = true, AllowCopy = true;
+        /// <summary>Ekspor PDF asli dengan password guru/pemilik (null = tombol disembunyikan).</summary>
+        public Action<IWin32Window>? ExportOriginal;
+        public Action? OnClosed;
+    }
+
     /// <summary>
     /// Porting dari ViewerActivity.kt:
-    /// Pembaca dokumen multi-format (.pdf, .docx, .xlsx, .csv, .txt, gambar)
+    /// Pembaca dokumen multi-format (.pdf, .docx, .xlsx, .pptx, .csv, .txt, gambar)
     /// dengan 4 Tema Kertas Eye-Care (Siang, Malam, Sepia, Eye-Care Hijau), Zoom 50%-250%,
     /// Penanda (Bookmark), Tanda Tangan Digital langsung ke PDF, Voice Reader, dan Cetak.
     /// </summary>
     public class ViewerForm : Form
     {
+        private readonly ViewerOptions _opt;
+        private readonly bool _isPptx;
         private readonly string _filePath;
         private readonly string _fileName;
         private readonly string _mime;
@@ -43,10 +56,12 @@ namespace DepupOfficeDesktop.Forms
         /// <summary>Form pemilik untuk dialog: saat tertanam di jendela utama, pakai jendela utamanya.</summary>
         private Form DlgOwner => TopLevelControl as Form ?? this;
 
-        public ViewerForm(string filePath)
+        public ViewerForm(string filePath, ViewerOptions? options = null)
         {
+            _opt = options ?? new ViewerOptions();
             _filePath = filePath;
-            _fileName = Path.GetFileName(filePath);
+            _fileName = _opt.DisplayName ?? Path.GetFileName(filePath);
+            _isPptx = filePath.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase);
             _mime = AppStorage.MimeByName(_fileName);
             _isPdf = _mime == AppStorage.MIME_PDF || _fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
 
@@ -66,18 +81,51 @@ namespace DepupOfficeDesktop.Forms
                 PdfEngine.EnsureUnlocked(null, _filePath);
                 _locked = PdfEngine.IsLocked(_filePath);
                 if (!_locked)
-                    _pdfPages = PdfEngine.RenderAllPages(_filePath, 1600);
+                    _pdfPages = PdfEngine.RenderAllPages(_filePath, PdfEngine.BudgetDim(_filePath, 1600));
+            }
+            else if (_isPptx && File.Exists(_filePath))
+            {
+                try
+                {
+                    using var pr = new PptxRenderer(_filePath);
+                    for (int i = 0; i < pr.SlideCount; i++) _pdfPages.Add(pr.RenderSlide(i, 1600));
+                }
+                catch (Exception ex) { _pptxError = ex.Message; }
             }
 
             BuildUi();
             RenderStage();
         }
 
+        private string? _pptxError;
+        private IntPtr _securedHwnd;
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            if (_opt.Secure)
+            {
+                // Jendela tertanam: perlindungan dipasang di jendela tingkat-atas (jendela utama).
+                var top = TopLevelControl as Form ?? this;
+                if (SecureDisplay.Protect(top.Handle, true)) _securedHwnd = top.Handle;
+            }
+        }
+
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            try { ClearStage(); } catch { }
             foreach (var b in _pdfPages) b.Dispose();
             _pdfPages.Clear();
+            if (_securedHwnd != IntPtr.Zero) SecureDisplay.Protect(_securedHwnd, false);
+            try { _opt.OnClosed?.Invoke(); } catch { }
             base.OnFormClosed(e);
+        }
+
+        private void StartSlideshow()
+        {
+            if (_pdfPages.Count == 0) return;
+            using var f = new SlideshowForm(_pdfPages, _fileName, ownsSlides: false, secure: _opt.Secure, start: _curPage);
+            f.ShowDialog(DlgOwner);
         }
 
         private void BuildUi()
@@ -156,9 +204,28 @@ namespace DepupOfficeDesktop.Forms
             btnSign.Visible = _isPdf && _pdfPages.Count > 0;
             var btnEdit = Act("✏️ Edit PDF", true, Theme.ACCENT, EditThisPdf);
             btnEdit.Visible = _isPdf && _pdfPages.Count > 0;
+            var btnShow = Act("▶ Slideshow", false, Theme.INDIGO, StartSlideshow);
+            btnShow.Visible = (_isPdf || _isPptx) && _pdfPages.Count > 0;
             Button? btnMore = null;
             btnMore = Act("⋮ Lainnya", false, Theme.TEXT, () => ShowMoreMenu(btnMore!));
-            actions.Controls.AddRange(new Control[] { _btnTheme, _btnBookmark, btnVoice, btnPrint, btnEdit, btnSign, btnMore });
+            btnMore.Visible = !_isPptx;
+            actions.Controls.AddRange(new Control[] { _btnTheme, _btnBookmark, btnVoice, btnPrint, btnShow, btnEdit, btnSign, btnMore });
+            if (_opt.Secure)
+            {
+                // Dokumen Terlindungi: tanpa sunting/tanda tangan/ekspor; cetak & baca-lantang mengikuti izin dokumen.
+                btnEdit.Visible = btnSign.Visible = btnMore.Visible = _btnBookmark.Visible = false;
+                btnPrint.Visible = _opt.AllowPrint;
+                btnVoice.Visible = _opt.AllowCopy;
+                if (_opt.ExportOriginal != null)
+                    actions.Controls.Add(Act("🔑 Ekspor PDF Asli", false, Theme.RED, () => _opt.ExportOriginal(DlgOwner)));
+                var secPill = new Label
+                {
+                    Text = "🔒 Dokumen Terlindungi • tangkapan & rekam layar diblokir" + (_opt.AllowCopy ? "" : " • salin dinonaktifkan") + (_opt.AllowPrint ? "" : " • cetak dinonaktifkan"),
+                    Font = Theme.FontLabel(9f), ForeColor = Theme.RED, BackColor = Theme.RED_BG, AutoSize = true,
+                    Padding = new Padding(S(8), S(3), S(8), S(3)), Margin = new Padding(S(8), S(10), S(4), S(2))
+                };
+                actions.Controls.Add(secPill);
+            }
 
             // ---- Baris 3: status tema/zoom + navigasi halaman ----
             var statusBar = new FlowLayoutPanel
@@ -272,7 +339,7 @@ namespace DepupOfficeDesktop.Forms
 
         private Bitmap ApplyThemeToPage(Bitmap src)
         {
-            if (_paperTheme == 0) return (Bitmap)src.Clone();
+            if (_paperTheme == 0) return src;   // tanpa salinan; ClearStage tidak membuang halaman sumber
             int w = src.Width, h = src.Height;
             var dst = new Bitmap(w, h, PixelFormat.Format32bppArgb);
             using var g = Graphics.FromImage(dst);
@@ -318,19 +385,49 @@ namespace DepupOfficeDesktop.Forms
             if (_locked) return;
 
             foreach (var b in _pdfPages) b.Dispose();
-            _pdfPages = PdfEngine.RenderAllPages(_filePath, 1600);
+            _pdfPages = PdfEngine.RenderAllPages(_filePath, PdfEngine.BudgetDim(_filePath, 1600));
             _curPage = 0;
             _counterPill.Text = _pdfPages.Count > 0 ? $"Hal 1 / {_pdfPages.Count}" : "Dokumen";
             RenderStage();
         }
 
+        /// <summary>
+        /// Kosongkan panggung DAN buang kontrol + gambar bertemanya. Controls.Clear() saja tidak membuang apa pun, sehingga
+        /// tiap ganti zoom/tema dulu membocorkan satu salinan bitmap per halaman.
+        /// </summary>
+        private void ClearStage()
+        {
+            var old = _stagePanel.Controls.Cast<Control>().ToList();
+            _stagePanel.Controls.Clear();
+            var source = new HashSet<Image>(_pdfPages);
+            void Dispose(Control c)
+            {
+                foreach (var ch in c.Controls.Cast<Control>().ToList()) Dispose(ch);
+                if (c is PictureBox pb && pb.Image is { } img)
+                {
+                    pb.Image = null;
+                    if (!source.Contains(img)) img.Dispose();   // halaman sumber dipakai tanpa salinan (tema Siang)
+                }
+                c.Dispose();
+            }
+            foreach (var c in old) Dispose(c);
+        }
+
         private void RenderStage()
         {
             _stagePanel.SuspendLayout();
-            _stagePanel.Controls.Clear();
+            ClearStage();
             _modeLabel.Text = $"● Tema: {GetThemeName()} • Zoom {(int)(_zoom * 100)}%";
 
-            if (_isPdf)
+            if (_isPptx && _pdfPages.Count == 0)
+            {
+                _stagePanel.Controls.Add(new Label
+                {
+                    Text = "Presentasi tidak dapat ditampilkan." + (_pptxError != null ? "\n" + _pptxError : ""),
+                    Font = Theme.FontLabel(11f), ForeColor = Theme.RED, AutoSize = true
+                });
+            }
+            else if (_isPdf || _isPptx)
             {
                 if (_locked)
                 {
@@ -389,10 +486,11 @@ namespace DepupOfficeDesktop.Forms
             }
             else if (_mime.StartsWith("image/"))
             {
-                using var raw = PdfEngine.Decode(_filePath, 2200);
+                var raw = PdfEngine.Decode(_filePath, 2200);
                 var themed = ApplyThemeToPage(raw);
+                if (!ReferenceEquals(themed, raw)) raw.Dispose();   // tema Siang: raw dipakai langsung & dibuang oleh ClearStage
                 int w = (int)(S(760) * _zoom);
-                int h = (int)((float)raw.Height / Math.Max(1, raw.Width) * w);
+                int h = (int)((float)themed.Height / Math.Max(1, themed.Width) * w);
                 var pb = new PictureBox
                 {
                     Image = themed,
@@ -531,7 +629,11 @@ namespace DepupOfficeDesktop.Forms
         private void StartVoiceReader()
         {
             string text = "";
-            if (_isPdf && _pdfPages.Count > 0)
+            if (_isPptx)
+            {
+                try { text = string.Join("\n\n", PptxRenderer.SlideTexts(_filePath).Select((t, i) => $"Slide {i + 1}:\n{t}")); } catch { }
+            }
+            else if (_isPdf && _pdfPages.Count > 0)
             {
                 var sb = new System.Text.StringBuilder();
                 for (int i = 0; i < Math.Min(_pdfPages.Count, 10); i++)
@@ -568,7 +670,14 @@ namespace DepupOfficeDesktop.Forms
 
         private void PrintCurrentDocument()
         {
-            if (_isPdf)
+            if (_opt.Secure && !_opt.AllowPrint) { Theme.Toast(DlgOwner, "Pemilik dokumen menonaktifkan cetak."); return; }
+            if (_isPptx)
+            {
+                // slide yang sudah dirender langsung dicetak (dulu: lewat PDF sementara yang tidak pernah dihapus)
+                try { PrintHelper.PrintPages(DlgOwner, _pdfPages, _fileName); }
+                catch (Exception ex) { MessageBox.Show(DlgOwner, $"Gagal mencetak presentasi: {ex.Message}", "Cetak Dokumen", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            }
+            else if (_isPdf)
                 PrintHelper.PrintPdf(DlgOwner, _filePath, _fileName);
             else if (_mime == AppStorage.MIME_DOCX)
                 PrintHelper.PrintText(DlgOwner, _fileName, OfficeReader.ReadDocxText(_filePath));

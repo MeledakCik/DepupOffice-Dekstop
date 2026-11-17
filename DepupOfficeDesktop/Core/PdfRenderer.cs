@@ -107,44 +107,104 @@ namespace DepupOfficeDesktop.Core
             }
 
             using var ras = new WinStreams.InMemoryRandomAccessStream();
-            WinPdf.PdfDocument doc;
+            WinPdf.PdfDocument? doc = TryLoad(ras, data, password);
+            if (doc == null)
+            {
+                if (!IsEncrypted(path)) return (PdfOpenStatus.Failed, default!);
+
+                // Mesin PDF Windows TIDAK mendukung AES-256 revisi 6 (dipakai Acrobat modern, Android Depup, dan alat
+                // Kunci/Anti-Kopi/Dokumen Terlindungi di aplikasi ini). Dekripsi di MEMORI memakai parser internal,
+                // lalu berikan salinan polosnya ke Windows. Tidak ada salinan polos yang ditulis ke disk.
+                var (st, plain) = DecryptForWindows(path, data, password);
+                if (plain == null) return (st, default!);
+                using var ras2 = new WinStreams.InMemoryRandomAccessStream();
+                doc = TryLoad(ras2, plain, null);
+                if (doc == null) return (PdfOpenStatus.Failed, default!);
+                return Work(doc, work);
+            }
+            return Work(doc, work);
+        }
+
+        private static (PdfOpenStatus, T) Work<T>(WinPdf.PdfDocument doc, Func<WinPdf.PdfDocument, T> work)
+        {
+            try { return (PdfOpenStatus.Ok, work(doc)); }
+            catch { return (PdfOpenStatus.Failed, default!); }
+        }
+
+        private static WinPdf.PdfDocument? TryLoad(WinStreams.InMemoryRandomAccessStream ras, byte[] data, string? password)
+        {
             try
             {
                 ras.WriteAsync(data.AsBuffer()).AsTask().GetAwaiter().GetResult();
                 ras.Seek(0);
-                doc = string.IsNullOrEmpty(password)
+                return string.IsNullOrEmpty(password)
                     ? WinPdf.PdfDocument.LoadFromStreamAsync(ras).AsTask().GetAwaiter().GetResult()
                     : WinPdf.PdfDocument.LoadFromStreamAsync(ras, password).AsTask().GetAwaiter().GetResult();
             }
-            catch
-            {
-                if (IsEncrypted(path))
-                    return (string.IsNullOrEmpty(password) ? PdfOpenStatus.PasswordRequired : PdfOpenStatus.WrongPassword, default!);
-                return (PdfOpenStatus.Failed, default!);
-            }
+            catch { return null; }
+        }
 
+        // Satu entri cache (berkas terakhir) agar PageCount → Render → dst. tidak mendekripsi ulang PDF besar.
+        private static (string Key, long Len, DateTime Mod, string Pw, byte[] Plain)? _plainCache;
+
+        private static (PdfOpenStatus, byte[]?) DecryptForWindows(string path, byte[] data, string? password)
+        {
+            string key = Key(path), pw = password ?? "";
+            DateTime mod;
+            try { mod = File.GetLastWriteTimeUtc(path); } catch { mod = default; }
+            lock (Gate)
+            {
+                if (_plainCache is { } c && c.Key == key && c.Len == data.Length && c.Mod == mod && c.Pw == pw)
+                    return (PdfOpenStatus.Ok, c.Plain);
+            }
             try
             {
-                return (PdfOpenStatus.Ok, work(doc));
+                var f = PdfFile.Open(data, pw);
+                var plain = PdfSave.WriteBytes(f);
+                lock (Gate) { WipeCache(); _plainCache = (key, data.Length, mod, pw, plain); }
+                return (PdfOpenStatus.Ok, plain);
             }
-            catch
+            catch (PdfPasswordException)
             {
-                return (PdfOpenStatus.Failed, default!);
+                return (string.IsNullOrEmpty(password) ? PdfOpenStatus.PasswordRequired : PdfOpenStatus.WrongPassword, null);
+            }
+            catch { return (PdfOpenStatus.Failed, null); }
+        }
+
+        private static void WipeCache()
+        {
+            if (_plainCache is { } c) Array.Clear(c.Plain);
+            _plainCache = null;
+        }
+
+        /// <summary>Hapus salinan terdekripsi di memori &amp; password yang diingat untuk <paramref name="path"/> (Dokumen Terlindungi ditutup).</summary>
+        public static void Forget(string path)
+        {
+            string key = Key(path);
+            lock (Gate)
+            {
+                Passwords.Remove(key);
+                if (_plainCache is { } c && c.Key == key) WipeCache();
             }
         }
 
-        private static Bitmap RenderPage(WinPdf.PdfPage page, int maxDim)
+        // Windows.Data.Pdf menafsirkan DestinationWidth/Height dalam DIP: pada layar ber-skala (mis. 140%) hasilnya
+        // 1,4× lebih besar dari yang diminta (≈2× memori & waktu). Faktor ini dipelajari dari render pertama.
+        private static double _dipScale = 1.0;
+
+        private static Bitmap RenderPage(WinPdf.PdfPage page, int maxDim, bool retried = false)
         {
             double pw = Math.Max(1.0, page.Size.Width);
             double ph = Math.Max(1.0, page.Size.Height);
             double scale = Math.Max(200, maxDim) / Math.Max(pw, ph);
             uint w = (uint)Math.Clamp(Math.Round(pw * scale), 1, 6000);
             uint h = (uint)Math.Clamp(Math.Round(ph * scale), 1, 6000);
+            double dip = Volatile.Read(ref _dipScale);
 
             var options = new WinPdf.PdfPageRenderOptions
             {
-                DestinationWidth = w,
-                DestinationHeight = h,
+                DestinationWidth = (uint)Math.Max(1, Math.Round(w / dip)),
+                DestinationHeight = (uint)Math.Max(1, Math.Round(h / dip)),
                 BackgroundColor = global::Microsoft.UI.Colors.White
             };
 
@@ -157,7 +217,24 @@ namespace DepupOfficeDesktop.Core
                 rs.CopyTo(ms);
             ms.Position = 0;
             using var tmp = new Bitmap(ms);
-            return new Bitmap(tmp);
+            if (Math.Abs(tmp.Width - (int)w) <= 2 && Math.Abs(tmp.Height - (int)h) <= 2)
+                return new Bitmap(tmp);
+
+            // Ukuran meleset (skala DPI): pelajari faktornya lalu render ulang SEKALI dengan ukuran yang benar (tetap tajam).
+            double got = tmp.Width / (double)options.DestinationWidth;
+            if (!retried && got > 0.5 && got < 4)
+            {
+                Volatile.Write(ref _dipScale, got);
+                return RenderPage(page, maxDim, true);
+            }
+            var dst = new Bitmap((int)w, (int)h);
+            using (var g = Graphics.FromImage(dst))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                g.DrawImage(tmp, 0, 0, (int)w, (int)h);
+            }
+            return dst;
         }
 
         private static List<Bitmap> RenderAll(WinPdf.PdfDocument doc, int maxDim)
@@ -189,6 +266,55 @@ namespace DepupOfficeDesktop.Core
             var (status, value) = Run(path, GetCachedPassword(path), d => RenderAll(d, maxDim));
             if (status == PdfOpenStatus.Ok && value != null)
                 pages = value;
+            return status;
+        }
+
+        /// <summary>Render hanya halaman [first, first+count) (0-based) — jauh lebih hemat dari <see cref="TryRender"/> untuk thumbnail / OCR sebagian.</summary>
+        public static PdfOpenStatus TryRenderRange(string path, int maxDim, int first, int count, out List<Bitmap> pages)
+        {
+            pages = new List<Bitmap>();
+            var (status, value) = Run(path, GetCachedPassword(path), d =>
+            {
+                var list = new List<Bitmap>();
+                try
+                {
+                    uint end = (uint)Math.Min((long)d.PageCount, (long)Math.Max(0, first) + Math.Max(0, count));
+                    for (uint i = (uint)Math.Max(0, first); i < end; i++)
+                    {
+                        using var page = d.GetPage(i);
+                        list.Add(RenderPage(page, maxDim));
+                    }
+                    return list;
+                }
+                catch { foreach (var b in list) b.Dispose(); throw; }
+            });
+            if (status == PdfOpenStatus.Ok && value != null) pages = value;
+            return status;
+        }
+
+        /// <summary>
+        /// Render halaman satu per satu dan serahkan ke <paramref name="onPage"/> (indeks, total, bitmap) — bitmap dibuang
+        /// setelah callback kembali, sehingga memori tetap kecil untuk PDF ratusan halaman. Callback berjalan di thread latar
+        /// dan mengembalikan false untuk berhenti lebih awal.
+        /// </summary>
+        public static PdfOpenStatus RenderEach(string path, int maxDim, Func<int, int, Bitmap, bool> onPage)
+        {
+            Exception? callbackError = null;
+            var (status, _) = Run(path, GetCachedPassword(path), d =>
+            {
+                int total = (int)d.PageCount;
+                for (uint i = 0; i < d.PageCount; i++)
+                {
+                    using var page = d.GetPage(i);
+                    using var bmp = RenderPage(page, maxDim);
+                    bool more;
+                    try { more = onPage((int)i, total, bmp); }
+                    catch (Exception ex) { callbackError = ex; throw; }
+                    if (!more) break;
+                }
+                return total;
+            });
+            if (callbackError != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(callbackError).Throw();
             return status;
         }
 

@@ -48,7 +48,7 @@ namespace DepupOfficeDesktop.Forms
             // Skala DPI harus ditetapkan sebelum satu pun kontrol dibuat.
             Theme.SetDpi(DeviceDpi);
 
-            Text = "Depup Office Desktop v2.2.0 — 100% Offline Document, PDF Editor & Vault Suite";
+            Text = "Depup Office Desktop v4.1.0 — 100% Offline Document, PDF Editor & Vault Suite";
             var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
             Size = new Size(Math.Min(Theme.S(1280), (int)(workArea.Width * 0.92)), Math.Min(Theme.S(840), (int)(workArea.Height * 0.92)));
             MinimumSize = new Size(Math.Min(Theme.S(940), workArea.Width), Math.Min(Theme.S(640), workArea.Height));
@@ -190,7 +190,7 @@ namespace DepupOfficeDesktop.Forms
             using var ofd = new OpenFileDialog
             {
                 Title = "Pilih Dokumen untuk Dibuka",
-                Filter = "Format yang didukung (*.pdf;*.docx;*.xlsx;*.csv;*.jpg;*.jpeg;*.png)|*.pdf;*.docx;*.xlsx;*.csv;*.jpg;*.jpeg;*.png|Semua berkas (*.*)|*.*"
+                Filter = "Format yang didukung (*.pdf;*.docx;*.xlsx;*.pptx;*.csv;*.jpg;*.jpeg;*.png)|*.pdf;*.docx;*.xlsx;*.pptx;*.csv;*.jpg;*.jpeg;*.png|Semua berkas (*.*)|*.*"
             };
             if (ofd.ShowDialog(this) == DialogResult.OK)
                 OpenDocument(ofd.FileName);
@@ -209,6 +209,16 @@ namespace DepupOfficeDesktop.Forms
             if (!File.Exists(filePath))
             {
                 Theme.Toast(this, "Berkas tidak ditemukan");
+                return;
+            }
+
+            // Dokumen Terlindungi DepUp (sampul + AES-256-GCM): dibuka di Reader mode aman.
+            if (ProtectedDoc.IsProtected(filePath))
+            {
+                _openingDocument = true;
+                try { await OpenProtectedDocumentAsync(filePath); }
+                finally { _openingDocument = false; _lastActionTick = Environment.TickCount64; }
+                RenderCurrentTab();
                 return;
             }
 
@@ -243,10 +253,10 @@ namespace DepupOfficeDesktop.Forms
         /// Tampilkan Reader DI DALAM jendela utama (menutupi area konten), bukan sebagai jendela kedua.
         /// Task selesai saat Reader ditutup.
         /// </summary>
-        private Task ShowViewerEmbeddedAsync(string filePath)
+        private Task ShowViewerEmbeddedAsync(string filePath, ViewerOptions? options = null)
         {
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var viewer = new ViewerForm(filePath)
+            var viewer = new ViewerForm(filePath, options)
             {
                 TopLevel = false,
                 FormBorderStyle = FormBorderStyle.None,
@@ -478,7 +488,8 @@ namespace DepupOfficeDesktop.Forms
             btnMerge.Click += (s, e) =>
             {
                 string outPdf = AppStorage.NewOut("gabung", "pdf");
-                PdfEngine.Merge(list, outPdf);
+                // Lossless (teks tetap asli); jatuh ke metode render bila struktur PDF tidak terbaca.
+                try { PdfToolsX.MergeAny(list, outPdf); } catch { PdfEngine.Merge(list, outPdf); }
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Gabung PDF", outPdf);
                 dlg.Close();
@@ -528,7 +539,7 @@ namespace DepupOfficeDesktop.Forms
                 int t = (int)numTo.Value;
                 if (f > t) { Theme.Toast(dlg, "Rentang halaman tidak valid"); return; }
                 string outPdf = AppStorage.NewOut($"pisah_{f}-{t}", "pdf");
-                PdfEngine.Split(pdfPath, f, t, outPdf);
+                try { PdfToolsX.SplitLossless(pdfPath, f, t, outPdf); } catch { PdfEngine.Split(pdfPath, f, t, outPdf); }
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Pisah PDF", outPdf);
                 dlg.Close();
@@ -621,7 +632,7 @@ namespace DepupOfficeDesktop.Forms
             bSave.Click += (s, e) =>
             {
                 string outPdf = AppStorage.NewOut("susun_" + AppStorage.BaseName(Path.GetFileName(pdfPath)), "pdf");
-                PdfEngine.OrganizePdf(pdfPath, pageOrder, rotations, outPdf);
+                try { PdfToolsX.OrganizeLossless(pdfPath, pageOrder, rotations, outPdf); } catch { PdfEngine.OrganizePdf(pdfPath, pageOrder, rotations, outPdf); }
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Susun PDF", outPdf);
                 dlg.Close();
@@ -1207,7 +1218,7 @@ namespace DepupOfficeDesktop.Forms
         {
             using var dlg = new Form
             {
-                Text = "Tentang Depup Office Desktop v2.2.0",
+                Text = "Tentang Depup Office Desktop v4.1.0",
                 Size = new Size(560, 360),
                 StartPosition = FormStartPosition.CenterParent,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
@@ -1220,7 +1231,7 @@ namespace DepupOfficeDesktop.Forms
 
             var lblTitle = new Label
             {
-                Text = "🚀 Depup Office Desktop v2.2.0",
+                Text = "🚀 Depup Office Desktop v4.1.0",
                 Font = Theme.FontHead(15f),
                 ForeColor = Theme.ACCENT,
                 Location = new Point(24, 18),

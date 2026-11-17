@@ -52,9 +52,10 @@ namespace DepupOfficeDesktop.Core
         public const string MIME_PDF = "application/pdf";
         public const string MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         public const string MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        public const string MIME_PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
         private static readonly HashSet<string> SupportedDocumentExtensions = new(StringComparer.OrdinalIgnoreCase)
         {
-            ".pdf", ".docx", ".xlsx", ".csv", ".jpg", ".jpeg", ".png", ".bmp"
+            ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".jpg", ".jpeg", ".png", ".bmp"
         };
 
         public static string OutDir { get; private set; } = "";
@@ -108,8 +109,9 @@ namespace DepupOfficeDesktop.Core
             return extension switch
             {
                 ".doc" => "Format Word .doc belum didukung. Simpan atau ekspor dokumen sebagai .docx, lalu buka kembali.",
+                ".ppt" => "Format PowerPoint .ppt lama belum didukung. Simpan presentasi sebagai .pptx, lalu buka kembali.",
                 ".xls" => "Format Excel .xls belum didukung. Simpan dokumen sebagai .xlsx atau .csv, lalu buka kembali.",
-                _ => $"Format { (string.IsNullOrEmpty(extension) ? "berkas ini" : extension) } belum didukung. Pilih PDF, DOCX, XLSX, CSV, JPG, atau PNG."
+                _ => $"Format { (string.IsNullOrEmpty(extension) ? "berkas ini" : extension) } belum didukung. Pilih PDF, DOCX, XLSX, PPTX, CSV, JPG, atau PNG."
             };
         }
 
@@ -179,6 +181,7 @@ namespace DepupOfficeDesktop.Core
                 "pdf" => MIME_PDF,
                 "docx" or "doc" => MIME_DOCX,
                 "xlsx" or "xls" => MIME_XLSX,
+                "pptx" => MIME_PPTX,
                 "csv" => "text/csv",
                 "txt" or "md" => "text/plain",
                 "jpg" or "jpeg" => "image/jpeg",
@@ -197,6 +200,8 @@ namespace DepupOfficeDesktop.Core
                 return ("DOCX", Theme.ACCENT, Theme.BLUE_BG);
             if (mime.Contains("sheet") || mime.Contains("excel") || n.EndsWith(".xls") || n.EndsWith(".xlsx") || n.EndsWith(".csv"))
                 return ("XLSX", Theme.TEAL, Theme.TEAL_BG);
+            if (n.EndsWith(".pptx"))
+                return ("PPTX", Theme.AMBER, Theme.AMBER_BG);
             if (mime.StartsWith("image/") || n.EndsWith(".jpg") || n.EndsWith(".jpeg") || n.EndsWith(".png"))
                 return ("IMG", Theme.SKY, Theme.SKY_BG);
             string ext = Path.GetExtension(name).TrimStart('.').ToUpperInvariant();

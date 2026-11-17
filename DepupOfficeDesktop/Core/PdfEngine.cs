@@ -119,12 +119,68 @@ namespace DepupOfficeDesktop.Core
 
         public static Bitmap? Thumbnail(string pdfPath, int pageIdx = 0, int targetW = 300)
         {
-            var pages = RenderAllPages(pdfPath, targetW * 2);
+            var pages = RenderPages(pdfPath, targetW * 2, Math.Max(0, pageIdx), 1);
             if (pages.Count == 0) return null;
-            int idx = Math.Clamp(pageIdx, 0, pages.Count - 1);
-            Bitmap chosen = (Bitmap)pages[idx].Clone();
-            foreach (var b in pages) b.Dispose();
-            return chosen;
+            for (int i = 1; i < pages.Count; i++) pages[i].Dispose();
+            return pages[0];
+        }
+
+        /// <summary>
+        /// Resolusi render agar SEMUA halaman (Reader / Slideshow menahan semuanya di memori) muat dalam ±1,2 GB.
+        /// PDF biasa (≤ ±160 halaman pada 1600px) tetap memakai <paramref name="preferred"/>; PDF ratusan halaman
+        /// diturunkan bertahap sampai <paramref name="minDim"/> agar aplikasi tidak kehabisan memori.
+        /// </summary>
+        public static int BudgetDim(string pdfPath, int preferred, int minDim = 700, long budgetBytes = 1_200L << 20)
+        {
+            int n = PdfRenderer.PageCount(pdfPath);
+            if (n <= 0) return preferred;
+            double perPage = budgetBytes / (double)n;             // byte per halaman
+            int dim = (int)Math.Sqrt(perPage / (4 * 0.71));        // 32bpp, rasio sisi ±A4
+            return Math.Clamp(dim, Math.Min(minDim, preferred), preferred);
+        }
+
+        /// <summary>
+        /// Render hanya halaman [first, first+count) (0-based). Memakai mesin Windows per halaman; bila tidak bisa,
+        /// jatuh ke <see cref="RenderAllPages"/> lalu mengambil potongannya.
+        /// </summary>
+        public static List<Bitmap> RenderPages(string pdfPath, int maxDim, int first, int count)
+        {
+            if (!File.Exists(pdfPath) || count <= 0) return new List<Bitmap>();
+            var status = PdfRenderer.TryRenderRange(pdfPath, maxDim, first, count, out var native);
+            if (status == PdfOpenStatus.Ok && native.Count > 0) return native;
+            if (status == PdfOpenStatus.PasswordRequired || status == PdfOpenStatus.WrongPassword) return new List<Bitmap>();
+            var all = RenderAllPages(pdfPath, maxDim);
+            var keep = new List<Bitmap>();
+            for (int i = 0; i < all.Count; i++)
+                if (i >= first && i < first + count) keep.Add(all[i]); else all[i].Dispose();
+            return keep;
+        }
+
+        /// <summary>
+        /// Proses halaman satu per satu (indeks, total, bitmap) tanpa menahan semua halaman di memori.
+        /// Bitmap dibuang setelah callback kembali. Mengembalikan jumlah halaman yang diproses.
+        /// </summary>
+        public static int ForEachPage(string pdfPath, int maxDim, Action<int, int, Bitmap> onPage, int maxPages = int.MaxValue)
+        {
+            if (!File.Exists(pdfPath) || maxPages <= 0) return 0;
+            int done = 0;
+            var status = PdfRenderer.RenderEach(pdfPath, maxDim, (i, total, bmp) =>
+            {
+                onPage(i, Math.Min(total, maxPages), bmp);
+                done++;
+                return done < maxPages;
+            });
+            if (status == PdfOpenStatus.Ok || done > 0) return done;
+            if (status == PdfOpenStatus.PasswordRequired || status == PdfOpenStatus.WrongPassword) return 0;
+            // Mesin Windows gagal (struktur rusak): jalur lama
+            var all = RenderAllPages(pdfPath, maxDim);
+            try
+            {
+                int n = Math.Min(all.Count, maxPages);
+                for (int i = 0; i < n; i++) onPage(i, n, all[i]);
+                return n;
+            }
+            finally { foreach (var b in all) b.Dispose(); }
         }
 
         /// <summary>

@@ -19,40 +19,46 @@ namespace DepupOfficeDesktop.Core
             {
                 if (!PdfEngine.EnsureUnlocked(owner, filePath)) return;
                 var pages = PdfEngine.RenderAllPages(filePath, 1600);
-                if (pages.Count == 0)
-                {
-                    Theme.Toast(owner, "Tidak ada halaman yang dapat dicetak");
-                    return;
-                }
-                int pageIdx = 0;
-                using var pd = new PrintDocument { DocumentName = $"DepupOffice_{documentName}" };
-                pd.PrintPage += (s, e) =>
-                {
-                    if (e.Graphics != null && pageIdx < pages.Count)
-                    {
-                        var bmp = pages[pageIdx];
-                        Rectangle bounds = e.MarginBounds;
-                        float scale = Math.Min((float)bounds.Width / bmp.Width, (float)bounds.Height / bmp.Height);
-                        int dw = (int)(bmp.Width * scale);
-                        int dh = (int)(bmp.Height * scale);
-                        int dx = bounds.Left + (bounds.Width - dw) / 2;
-                        int dy = bounds.Top + (bounds.Height - dh) / 2;
-                        e.Graphics.DrawImage(bmp, new Rectangle(dx, dy, dw, dh));
-                    }
-                    pageIdx++;
-                    e.HasMorePages = pageIdx < pages.Count;
-                };
-
-                using var dlg = new PrintDialog { Document = pd, UseEXDialog = true };
-                if (dlg.ShowDialog(owner) == DialogResult.OK)
-                    pd.Print();
-
-                foreach (var b in pages) b.Dispose();
+                try { PrintPages(owner, pages, documentName); }
+                finally { foreach (var b in pages) b.Dispose(); }
             }
             catch (Exception ex)
             {
                 MessageBox.Show(owner, $"Gagal mencetak PDF: {ex.Message}", "Cetak Dokumen", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        /// <summary>Cetak halaman yang sudah dirender (mis. slide PPTX). Bitmap TIDAK dibuang di sini.</summary>
+        public static void PrintPages(Form owner, IReadOnlyList<Bitmap> pages, string documentName)
+        {
+            if (pages.Count == 0)
+            {
+                Theme.Toast(owner, "Tidak ada halaman yang dapat dicetak");
+                return;
+            }
+            int pageIdx = 0;
+            using var pd = new PrintDocument { DocumentName = $"DepupOffice_{documentName}" };
+            pd.BeginPrint += (s, e) => pageIdx = 0;   // pratinjau/cetak ulang mulai dari halaman pertama
+            pd.PrintPage += (s, e) =>
+            {
+                if (e.Graphics != null && pageIdx < pages.Count)
+                {
+                    var bmp = pages[pageIdx];
+                    Rectangle bounds = e.MarginBounds;
+                    float scale = Math.Min((float)bounds.Width / bmp.Width, (float)bounds.Height / bmp.Height);
+                    int dw = (int)(bmp.Width * scale);
+                    int dh = (int)(bmp.Height * scale);
+                    int dx = bounds.Left + (bounds.Width - dw) / 2;
+                    int dy = bounds.Top + (bounds.Height - dh) / 2;
+                    e.Graphics.DrawImage(bmp, new Rectangle(dx, dy, dw, dh));
+                }
+                pageIdx++;
+                e.HasMorePages = pageIdx < pages.Count;
+            };
+
+            using var dlg = new PrintDialog { Document = pd, UseEXDialog = true };
+            if (dlg.ShowDialog(owner) == DialogResult.OK)
+                pd.Print();
         }
 
         public static void PrintBitmap(Form owner, Bitmap bitmap, string jobName)
