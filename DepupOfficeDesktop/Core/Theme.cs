@@ -6,8 +6,9 @@ using System.Windows.Forms;
 namespace DepupOfficeDesktop.Core
 {
     /// <summary>
-    /// Palet "Depup PDF System" (desain Stitch dari Ui.kt):
-    /// Kanvas terang, aksen biru PDF, kategori berkode warna.
+    /// Palet Depup v4.1 — sama dengan token Android (Ui.kt, object C, tema terang):
+    /// minimalis netral-hangat. Halaman abu batu muda, kartu putih rata tanpa gradien, satu aksen biru royal,
+    /// warna kategori dipakai kecil-kecil (ikon di wadah lembut).
     /// </summary>
     public static class Theme
     {
@@ -19,41 +20,73 @@ namespace DepupOfficeDesktop.Core
         /// <summary>Ubah ukuran piksel desain (96 DPI) menjadi piksel nyata layar saat ini.</summary>
         public static int S(int px) => (int)Math.Round(px * Scale);
 
-        public static readonly Color BG = ColorTranslator.FromHtml("#F8FAFC");
-        public static readonly Color SURFACE = ColorTranslator.FromHtml("#FFFFFF");
-        public static readonly Color SURFACE2 = ColorTranslator.FromHtml("#F1F5F9");
-        public static readonly Color ACCENT = ColorTranslator.FromHtml("#1E60D5");
-        public static readonly Color ACCENT_DARK = ColorTranslator.FromHtml("#1A52B8");
-        public static readonly Color TEXT = ColorTranslator.FromHtml("#0F172A");
-        public static readonly Color MUTED = ColorTranslator.FromHtml("#64748B");
-        public static readonly Color LINE = ColorTranslator.FromHtml("#E2E8F0");
+        private static Color H(string hex) => ColorTranslator.FromHtml(hex);
 
-        public static readonly Color BLUE_BG = ColorTranslator.FromHtml("#EFF6FF");
-        public static readonly Color BLUE_LINE = ColorTranslator.FromHtml("#BFDBFE");
-        public static readonly Color INDIGO = ColorTranslator.FromHtml("#4F46E5");
-        public static readonly Color INDIGO_BG = ColorTranslator.FromHtml("#EEF2FF");
-        public static readonly Color SKY = ColorTranslator.FromHtml("#0284C7");
-        public static readonly Color SKY_BG = ColorTranslator.FromHtml("#E0F2FE");
-        public static readonly Color AMBER = ColorTranslator.FromHtml("#D97706");
-        public static readonly Color AMBER_BG = ColorTranslator.FromHtml("#FEF3C7");
-        public static readonly Color TEAL = ColorTranslator.FromHtml("#0D9488");
-        public static readonly Color TEAL_BG = ColorTranslator.FromHtml("#ECFDF5");
-        public static readonly Color RED = ColorTranslator.FromHtml("#DC2626");
-        public static readonly Color RED_BG = ColorTranslator.FromHtml("#FEF2F2");
+        // ---------- Permukaan ----------
+        public static readonly Color BG = H("#F1F0EC");          // latar halaman
+        public static readonly Color SURFACE = H("#FFFFFF");     // kartu, navigasi
+        public static readonly Color SURFACE2 = H("#E8E6E1");    // isian, chip, trek
+        public static readonly Color SURFACE3 = H("#DCD9D3");    // ditekan / terpilih netral
+        public static readonly Color SOFT = H("#F3F2EE");        // wadah ikon netral di dalam kartu putih
+        public static readonly Color LINE = H("#E4E2DD");        // pemisah tipis
+        public static readonly Color LINE_STRONG = H("#84817B");
+
+        // ---------- Aksen biru royal ----------
+        public static readonly Color ACCENT = H("#1652F6");
+        public static readonly Color ACCENT_DARK = H("#0F43D4");
+        public static readonly Color BRAND = H("#0037FF");       // ubin logo
+        public static readonly Color BLUE_BG = H("#E8EEFF");     // wadah lembut biru
+        public static readonly Color BLUE_LINE = H("#C9D6FF");
+
+        // ---------- Tinta & teks ----------
+        public static readonly Color INK = H("#111111");
+        public static readonly Color TEXT = H("#111111");
+        public static readonly Color MUTED = H("#65625D");
+
+        // ---------- Kategori (ikon di wadah lembut) ----------
+        public static readonly Color RED = H("#B0472F");         // PDF
+        public static readonly Color RED_BG = H("#F5E6E1");
+        public static readonly Color TEAL = H("#35754C");        // Excel
+        public static readonly Color TEAL_BG = H("#E3EEE6");
+        public static readonly Color INDIGO = H("#72539E");      // gambar / lain-lain
+        public static readonly Color INDIGO_BG = H("#ECE6F3");
+        public static readonly Color SKY = H("#33609F");         // Word
+        public static readonly Color SKY_BG = H("#E4EAF3");
+        public static readonly Color AMBER = H("#8A4508");
+        public static readonly Color AMBER_BG = H("#FDF0CC");
+        public static readonly Color ERROR = H("#C0262D");
+        public static readonly Color ERROR_BG = H("#FCE4E4");
+        public static readonly Color SUCCESS = H("#15703A");
+        public static readonly Color SUCCESS_BG = H("#DCF5E4");
 
         // Tema Reader Kertas & Eye-Care (ViewerActivity.kt)
-        public static readonly Color NIGHT_BG = ColorTranslator.FromHtml("#0F172A");
-        public static readonly Color SEPIA_BG = ColorTranslator.FromHtml("#FBF0D9");
-        public static readonly Color EYECARE_GREEN_BG = ColorTranslator.FromHtml("#E2F0D9");
+        public static readonly Color NIGHT_BG = H("#0F0F0E");
+        public static readonly Color SEPIA_BG = H("#FBF0D9");
+        public static readonly Color EYECARE_GREEN_BG = H("#E2F0D9");
+
+        // Font: Android memakai Funnel Display; padanan bawaan Windows 11 = Segoe UI Variable (fallback Segoe UI).
+        private static readonly bool HasVariable = FontExists("Segoe UI Variable Display");
+        private static bool FontExists(string name)
+        {
+            try { using var f = new Font(name, 10f); return string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase); }
+            catch { return false; }
+        }
+        private static string HeadFamily => HasVariable ? "Segoe UI Variable Display Semib" : "Segoe UI Semibold";
+        private static string LabelFamily => HasVariable ? "Segoe UI Variable Text Semibold" : "Segoe UI Semibold";
+        private static string BodyFamily => HasVariable ? "Segoe UI Variable Text" : "Segoe UI";
 
         public static Font FontHead(float sizePt = 16f, FontStyle style = FontStyle.Bold)
-            => new Font("Segoe UI", sizePt, style, GraphicsUnit.Point);
+            => new Font(HeadFamily, sizePt, style & ~FontStyle.Bold, GraphicsUnit.Point);
+
+        /// <summary>Judul tampilan besar (sapaan beranda, judul halaman).</summary>
+        public static Font FontDisplay(float sizePt = 28f)
+            => new Font(HeadFamily, sizePt, FontStyle.Regular, GraphicsUnit.Point);
 
         public static Font FontLabel(float sizePt = 10.5f, FontStyle style = FontStyle.Regular)
-            => new Font("Segoe UI Semibold", sizePt, style, GraphicsUnit.Point);
+            => new Font(LabelFamily, sizePt, style, GraphicsUnit.Point);
 
         public static Font FontBody(float sizePt = 10f, FontStyle style = FontStyle.Regular)
-            => new Font("Segoe UI", sizePt, style, GraphicsUnit.Point);
+            => new Font(BodyFamily, sizePt, style, GraphicsUnit.Point);
 
         public static Font FontMono(float sizePt = 10f)
             => new Font("Consolas", sizePt, FontStyle.Regular, GraphicsUnit.Point);
@@ -90,10 +123,11 @@ namespace DepupOfficeDesktop.Core
                 Cursor = Cursors.Hand,
                 AutoSize = width == 0,
                 Padding = new Padding(12, 4, 12, 4),
-                UseVisualStyleBackColor = false
+                UseVisualStyleBackColor = false,
+                CornerRadius = 999   // pil penuh (gaya Android)
             };
             if (width > 0) btn.Width = width;
-            btn.FlatAppearance.BorderSize = filled ? 0 : 1;
+            btn.FlatAppearance.BorderSize = 0;
             btn.FlatAppearance.BorderColor = filled ? col : BLUE_LINE;
             return btn;
         }
@@ -107,7 +141,7 @@ namespace DepupOfficeDesktop.Core
                 {
                     Text = "  " + message + "  ",
                     AutoSize = true,
-                    BackColor = Color.FromArgb(235, 15, 23, 42),
+                    BackColor = INK,
                     ForeColor = Color.White,
                     Font = FontLabel(10f),
                     Padding = new Padding(S(14), S(8), S(14), S(8))
