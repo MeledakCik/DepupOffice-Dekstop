@@ -520,7 +520,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var lbl = new Label { Text = "Teks Watermark Diagonal:", Font = Theme.FontLabel(10f), Location = new Point(20, 18), AutoSize = true };
@@ -617,7 +617,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var flow = new FlowLayoutPanel
@@ -729,7 +729,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var pad = new Panel { Dock = DockStyle.Fill, Padding = new Padding(22) };

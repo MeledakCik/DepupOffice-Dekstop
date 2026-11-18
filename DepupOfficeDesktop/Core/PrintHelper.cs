@@ -166,7 +166,7 @@ namespace DepupOfficeDesktop.Core
                             float cy = startY + r * cellH;
                             if (r == 0)
                             {
-                                using var hb = new SolidBrush(Theme.SURFACE2);
+                                using var hb = new SolidBrush(Theme.PAPER_SOFT);
                                 e.Graphics.FillRectangle(hb, cx, cy, cellW, cellH);
                             }
                             e.Graphics.DrawRectangle(linePen, cx, cy, cellW, cellH);

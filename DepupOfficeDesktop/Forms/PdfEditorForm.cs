@@ -448,7 +448,7 @@ namespace DepupOfficeDesktop.Forms
             Size = new Size(S(1240), S(860));
             MinimumSize = new Size(S(900), S(600));
             StartPosition = FormStartPosition.CenterParent;
-            BackColor = ColorTranslator.FromHtml("#E9EDF7");
+            BackColor = Theme.BG;
             KeyPreview = true;
 
             LoadSource();
@@ -630,7 +630,8 @@ namespace DepupOfficeDesktop.Forms
             };
 
             // --- Area halaman ---
-            _host = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = ColorTranslator.FromHtml("#CBD5E1") };
+            _host = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.CANVAS };
+            Theme.DarkScrollbars(_host);
             _canvas = new EditCanvas();
             _host.Controls.Add(_canvas);
             _host.Resize += (s, e) => CenterCanvas();
@@ -777,7 +778,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 bool on = kv.Key == t;
                 kv.Value.BackColor = on ? Theme.ACCENT : Theme.BLUE_BG;
-                kv.Value.ForeColor = on ? Color.White : Theme.ACCENT;
+                kv.Value.ForeColor = on ? Color.White : Theme.ACCENT_LIGHT;
             }
             _canvas.Cursor = t == EditTool.Select ? Cursors.Default : (t == EditTool.Text || t == EditTool.EditText ? Cursors.IBeam : Cursors.Cross);
         }
@@ -875,6 +876,11 @@ namespace DepupOfficeDesktop.Forms
                 try
                 {
                     _ocr[idx] = await Task.Run(() => { using (copy) return PdfEngine.RunOcr(copy); });
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "OCR gagal: " + ex.Message, "OCR tidak tersedia", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
                 }
                 finally { Cursor = Cursors.Default; }
                 if (!string.IsNullOrEmpty(PdfEngine.LastOcrError))
@@ -1029,7 +1035,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
             dlg.Controls.Add(new Label { Text = "Goreskan tanda tangan di kotak putih:", Location = new Point(S(20), S(14)), AutoSize = true, Font = Theme.FontLabel(9.5f) });
             var pad = new SignaturePadControl { Location = new Point(S(20), S(40)), Size = new Size(S(420), S(170)) };
@@ -1168,7 +1174,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
             var chk = new CheckBox
             {

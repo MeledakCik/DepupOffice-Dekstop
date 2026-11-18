@@ -384,7 +384,7 @@ namespace DepupOfficeDesktop.Core
                 MaximizeBox = false,
                 MinimizeBox = false,
                 ShowInTaskbar = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var lbl = new Label
@@ -449,6 +449,7 @@ namespace DepupOfficeDesktop.Core
             f.CancelButton = btnCancel;
             f.Shown += (s, e) => txt.Focus();
 
+            Theme.ScaleRawDialog(f);
             return f.ShowDialog(owner) == DialogResult.OK ? result : null;
         }
     }

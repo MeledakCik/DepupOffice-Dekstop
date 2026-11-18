@@ -8,17 +8,24 @@ using DepupOfficeDesktop.Core;
 
 namespace DepupOfficeDesktop.Controls
 {
-    /// <summary>Kartu membulat. Menggambar sendiri latar, gradasi, border (putus-putus opsional) dan efek hover.</summary>
+    /// <summary>
+    /// Kartu kaca membulat: gradasi kilau halus dari atas, tepi tipis bercahaya, garis sorot di sisi atas,
+    /// border (putus-putus opsional), garis aksen kiri opsional, dan efek hover.
+    /// </summary>
     public class CardPanel : Panel
     {
         private bool _hover;
-        public int CornerRadius { get; set; } = 20;
+        public int CornerRadius { get; set; } = 16;
         public Color BorderColor { get; set; } = Theme.LINE;
         public int BorderThickness { get; set; } = 1;
         public bool DashedBorder { get; set; }
         public bool Hoverable { get; set; }
         public Color? GradientStart { get; set; }
         public Color? GradientEnd { get; set; }
+        /// <summary>Garis aksen vertikal di tepi kiri (mis. kartu statistik aktif).</summary>
+        public Color? AccentEdge { get; set; }
+        /// <summary>Kilau kaca (gradasi + garis sorot atas). Default aktif.</summary>
+        public bool Glass { get; set; } = true;
 
         public CardPanel()
         {
@@ -60,38 +67,69 @@ namespace DepupOfficeDesktop.Controls
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
             int inset = BorderThickness / 2;
             var rect = new Rectangle(inset, inset, Width - 1 - BorderThickness, Height - 1 - BorderThickness);
             if (rect.Width <= 0 || rect.Height <= 0) return;
-            using var path = Theme.RoundedRect(rect, Theme.S(CornerRadius));
+            int radius = Theme.S(CornerRadius);
+            using var path = Theme.RoundedRect(rect, radius);
+            bool hot = Hoverable && _hover;
 
-            if (GradientStart.HasValue && GradientEnd.HasValue && Width > 0 && Height > 0)
+            if (GradientStart.HasValue && GradientEnd.HasValue)
             {
                 using var lgb = new LinearGradientBrush(ClientRectangle, GradientStart.Value, GradientEnd.Value, LinearGradientMode.ForwardDiagonal);
-                e.Graphics.FillPath(lgb, path);
+                g.FillPath(lgb, path);
+                if (Glass)
+                {
+                    // sorotan kaca: lapisan putih tipis di separuh atas
+                    var top = new Rectangle(rect.X, rect.Y, rect.Width, Math.Max(1, rect.Height / 2));
+                    using var gloss = new LinearGradientBrush(new Rectangle(top.X, top.Y - 1, top.Width, top.Height + 2),
+                        Color.FromArgb(34, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), LinearGradientMode.Vertical);
+                    var oldClip = g.Clip;
+                    g.SetClip(path, CombineMode.Intersect);
+                    g.FillRectangle(gloss, top);
+                    g.Clip = oldClip;
+                }
             }
             else
             {
-                using var sb = new SolidBrush(BackColor);
-                e.Graphics.FillPath(sb, path);
+                Color baseCol = hot ? Theme.Mix(BackColor, Color.White, 0.03) : BackColor;
+                if (Glass && Theme.Luma(BackColor) < 0.3)
+                {
+                    using var lgb = new LinearGradientBrush(new Rectangle(0, -1, Width, Height + 2),
+                        Theme.Mix(baseCol, Color.White, 0.045), baseCol, LinearGradientMode.Vertical);
+                    g.FillPath(lgb, path);
+                }
+                else
+                {
+                    using var sb = new SolidBrush(baseCol);
+                    g.FillPath(sb, path);
+                }
             }
 
-            // Gaya Android: kartu putih rata tanpa garis di atas latar halaman. Garis hanya bila kartu menyatu dengan
-            // latar induknya (mis. di dialog putih), bila putus-putus, atau saat disorot.
-            bool blends = (Parent?.BackColor ?? Theme.BG).ToArgb() == BackColor.ToArgb();
-            bool hot = Hoverable && _hover;
-            if (BorderThickness > 0 && (blends || DashedBorder || hot || BorderColor != Theme.LINE))
+            if (AccentEdge is Color edge)
             {
-                Color border = hot ? Theme.ACCENT : BorderColor;
-                using var pen = new Pen(border, hot ? Math.Max(1.5f, BorderThickness) : BorderThickness);
-                if (DashedBorder) pen.DashStyle = DashStyle.Dash;
-                e.Graphics.DrawPath(pen, path);
+                var oldClip = g.Clip;
+                g.SetClip(path, CombineMode.Intersect);
+                using var eb = new SolidBrush(edge);
+                g.FillRectangle(eb, rect.X, rect.Y, Theme.S(3), rect.Height);
+                g.Clip = oldClip;
             }
-            else if (hot)
+
+            if (BorderThickness > 0 || hot)
             {
-                using var pen = new Pen(Theme.ACCENT, 1.5f);
-                e.Graphics.DrawPath(pen, path);
+                Color border = hot ? Theme.BLUE_LINE : BorderColor;
+                using var pen = new Pen(border, Math.Max(1, BorderThickness));
+                if (DashedBorder && !hot) pen.DashStyle = DashStyle.Dash;
+                g.DrawPath(pen, path);
+            }
+
+            // garis sorot kaca di tepi atas
+            if (Glass && rect.Width > radius * 2 + 4)
+            {
+                using var hl = new Pen(Color.FromArgb(GradientStart.HasValue ? 70 : 26, 255, 255, 255), 1f);
+                g.DrawLine(hl, rect.X + radius, rect.Y + 1, rect.Right - radius, rect.Y + 1);
             }
         }
     }
@@ -169,26 +207,29 @@ namespace DepupOfficeDesktop.Controls
             using var path = Theme.RoundedRect(rect, radius);
 
             Color fill = Enabled ? BackColor : Theme.SURFACE2;
-            if (Enabled && _down) fill = Shade(fill, 0.88);
-            else if (Enabled && _hover) fill = Shade(fill, 0.94);
+            bool darkFill = Theme.Luma(fill) < 0.5;
+            if (Enabled && _down) fill = darkFill ? Theme.Mix(fill, Color.Black, 0.18) : Shade(fill, 0.86);
+            else if (Enabled && _hover) fill = darkFill ? Theme.Mix(fill, Color.White, 0.08) : Shade(fill, 0.93);
             using (var b = new SolidBrush(fill))
                 g.FillPath(b, path);
 
             if (FlatAppearance.BorderSize > 0)
             {
-                using var pen = new Pen(FlatAppearance.BorderColor, FlatAppearance.BorderSize);
+                Color bc = FlatAppearance.BorderColor.IsEmpty ? Theme.LINE : FlatAppearance.BorderColor;
+                if (Enabled && _hover && darkFill) bc = Theme.Mix(bc, Color.White, 0.12);
+                using var pen = new Pen(bc, FlatAppearance.BorderSize);
                 g.DrawPath(pen, path);
             }
 
             var textRect = new Rectangle(Padding.Left, 0, Math.Max(1, Width - Padding.Horizontal), Height);
-            TextRenderer.DrawText(g, Text, Font, textRect, Enabled ? ForeColor : Theme.MUTED,
+            TextRenderer.DrawText(g, Text, Font, textRect, Enabled ? ForeColor : Theme.FAINT,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
 
             if (Focused && ShowFocusCues)
             {
                 var ring = Rectangle.Inflate(rect, -2, -2);
                 using var ringPath = Theme.RoundedRect(ring, Math.Max(2, radius - 2));
-                using var ringPen = new Pen(Theme.ACCENT, 2f);
+                using var ringPen = new Pen(Theme.ACCENT_LIGHT, 2f);
                 g.DrawPath(ringPen, ringPath);
             }
         }
@@ -204,6 +245,11 @@ namespace DepupOfficeDesktop.Controls
         public bool AutoFit { get; set; } = true;
         /// <summary>Radius sudut dalam piksel nyata. 0 = kapsul penuh.</summary>
         public int Radius { get; set; } = 0;
+        /// <summary>Garis tepi tipis (gaya lencana kaca). Null = tanpa garis.</summary>
+        public Color? Outline { get; set; }
+        /// <summary>Titik status kecil di kiri teks (mis. hijau = aktif).</summary>
+        public Color? Dot { get => _dot; set { _dot = value; Fit(); Invalidate(); } }
+        private Color? _dot;
 
         public Pill()
         {
@@ -221,7 +267,7 @@ namespace DepupOfficeDesktop.Controls
         {
             if (!AutoFit) return;
             var sz = TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
-            Size = new Size(sz.Width + Theme.S(20), sz.Height + Theme.S(8));
+            Size = new Size(sz.Width + Theme.S(22) + (Dot.HasValue ? Theme.S(16) : 0), sz.Height + Theme.S(8));
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -234,9 +280,19 @@ namespace DepupOfficeDesktop.Controls
             using var path = Theme.RoundedRect(rect, r);
             using (var b = new SolidBrush(_bg))
                 g.FillPath(b, path);
+            if (Outline is Color oc)
+                using (var pen = new Pen(oc)) g.DrawPath(pen, path);
+            var textRect = new Rectangle(0, 0, Width, Height);
+            if (Dot is Color dc)
+            {
+                int d = Theme.S(6);
+                int dx = Theme.S(10);
+                using (var db = new SolidBrush(dc)) g.FillEllipse(db, dx, (Height - d) / 2, d, d);
+                textRect = new Rectangle(dx + d, 0, Width - dx - d, Height);
+            }
             if (!string.IsNullOrEmpty(Text))
-                TextRenderer.DrawText(g, Text, Font, new Rectangle(0, 0, Width, Height), _fg,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(g, Text, Font, textRect, _fg,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
         }
     }
 
@@ -300,14 +356,22 @@ namespace DepupOfficeDesktop.Controls
             int vGap = Theme.S(3);
             var body = new Rectangle(0, vGap, Width - 1, Height - 1 - vGap * 2);
             if (body.Width <= 0 || body.Height <= 0) return;
-            int radius = body.Height / 2;   // pil penuh
+            int radius = Theme.S(10);
             using var path = Theme.RoundedRect(body, radius);
             if (_active)
-                using (var b = new SolidBrush(Theme.ACCENT)) g.FillPath(b, path);
+            {
+                // sorotan kaca biru + tepi bercahaya (gaya panel navigasi WPS / Office modern)
+                using (var b = new LinearGradientBrush(body, Theme.Mix(Theme.BLUE_BG, Theme.ACCENT, 0.18), Theme.BLUE_BG, LinearGradientMode.Horizontal))
+                    g.FillPath(b, path);
+                using (var pen = new Pen(Theme.BLUE_LINE)) g.DrawPath(pen, path);
+                using var bar = new SolidBrush(Theme.CYAN);
+                int bh = Math.Max(Theme.S(14), body.Height / 2);
+                g.FillRectangle(bar, body.X, body.Y + (body.Height - bh) / 2, Theme.S(3), bh);
+            }
             else if (_hover)
                 using (var b = new SolidBrush(Theme.SURFACE2)) g.FillPath(b, path);
 
-            Color fg = _active ? Color.White : (Muted ? Inactive : Theme.TEXT);
+            Color fg = _active ? Color.White : (Muted ? Inactive : Theme.Mix(Theme.TEXT, Theme.MUTED, 0.25));
             int chipSize = Theme.S(20);
             var chip = new Rectangle(Theme.S(16), (Height - chipSize) / 2, chipSize, chipSize);
             DrawIcon(g, chip, fg);
@@ -319,7 +383,7 @@ namespace DepupOfficeDesktop.Controls
             if (Focused && ShowFocusCues)
             {
                 using var ringPath = Theme.RoundedRect(Rectangle.Inflate(body, -1, -1), Math.Max(2, radius - 1));
-                using var ringPen = new Pen(Theme.ACCENT, 2f);
+                using var ringPen = new Pen(Theme.ACCENT_LIGHT, 2f);
                 g.DrawPath(ringPen, ringPath);
             }
         }
@@ -397,10 +461,12 @@ namespace DepupOfficeDesktop.Controls
         }
     }
 
-    /// <summary>Kolom pencarian membulat dengan TextBox tanpa border di dalamnya.</summary>
+    /// <summary>Kolom pencarian kaca dengan TextBox tanpa border di dalamnya dan petunjuk pintasan di kanan.</summary>
     public class SearchBox : Control
     {
         public TextBox Input { get; }
+        /// <summary>Teks pintasan di sisi kanan (mis. "Ctrl+K"). Kosong = disembunyikan.</summary>
+        public string Shortcut { get; set; } = "Ctrl+K";
 
         public SearchBox()
         {
@@ -410,7 +476,7 @@ namespace DepupOfficeDesktop.Controls
             Input = new TextBox
             {
                 BorderStyle = BorderStyle.None,
-                BackColor = Theme.SURFACE,
+                BackColor = Theme.FIELD,
                 ForeColor = Theme.TEXT,
                 Font = Theme.FontBody(10.5f)
             };
@@ -419,13 +485,14 @@ namespace DepupOfficeDesktop.Controls
             Controls.Add(Input);
         }
 
-        private int IconZone => Theme.S(46);
+        private int IconZone => Theme.S(42);
+        private int ShortcutZone => string.IsNullOrEmpty(Shortcut) || Width < Theme.S(260) ? Theme.S(14) : Theme.S(76);
 
         protected override void OnLayout(LayoutEventArgs levent)
         {
             base.OnLayout(levent);
             int h = Input.PreferredHeight;
-            Input.SetBounds(IconZone, Math.Max(0, (Height - h) / 2), Math.Max(10, Width - IconZone - Theme.S(20)), h);
+            Input.SetBounds(IconZone, Math.Max(0, (Height - h) / 2), Math.Max(10, Width - IconZone - ShortcutZone), h);
         }
 
         protected override void OnMouseDown(MouseEventArgs e) { Input.Focus(); base.OnMouseDown(e); }
@@ -436,16 +503,28 @@ namespace DepupOfficeDesktop.Controls
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
             if (rect.Width <= 0 || rect.Height <= 0) return;
-            using var path = Theme.RoundedRect(rect, rect.Height / 2);   // pil penuh
-            using (var b = new SolidBrush(Theme.SURFACE)) g.FillPath(b, path);
-            using (var pen = new Pen(Input.Focused ? Theme.ACCENT : Theme.LINE, Input.Focused ? 2f : 1f))
+            using var path = Theme.RoundedRect(rect, Theme.S(12));
+            using (var b = new SolidBrush(Theme.FIELD)) g.FillPath(b, path);
+            using (var pen = new Pen(Input.Focused ? Theme.ACCENT : Theme.LINE, Input.Focused ? 1.6f : 1f))
                 g.DrawPath(pen, path);
 
             // ikon kaca pembesar
-            float s = Theme.Scale, cx = Theme.S(22), cy = Height / 2f;
-            using var ip = new Pen(Theme.MUTED, 1.8f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            float s = Theme.Scale, cx = Theme.S(21), cy = Height / 2f;
+            using var ip = new Pen(Theme.MUTED, 1.7f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             g.DrawEllipse(ip, cx - 6 * s, cy - 6 * s, 11 * s, 11 * s);
             g.DrawLine(ip, cx + 3.5f * s, cy + 3.5f * s, cx + 7.5f * s, cy + 7.5f * s);
+
+            // petunjuk pintasan
+            if (ShortcutZone > Theme.S(20))
+            {
+                using var f = Theme.FontMono(8f);
+                var sz = TextRenderer.MeasureText(Shortcut, f, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
+                var kr = new Rectangle(Width - Theme.S(12) - sz.Width - Theme.S(12), (Height - sz.Height - Theme.S(8)) / 2, sz.Width + Theme.S(12), sz.Height + Theme.S(8));
+                using var kp = Theme.RoundedRect(kr, Theme.S(6));
+                using (var kb = new SolidBrush(Theme.SURFACE2)) g.FillPath(kb, kp);
+                using (var kpen = new Pen(Theme.LINE)) g.DrawPath(kpen, kp);
+                TextRenderer.DrawText(g, Shortcut, f, kr, Theme.MUTED, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
         }
 
         protected override void OnGotFocus(EventArgs e) { Input.Focus(); base.OnGotFocus(e); }
@@ -468,7 +547,7 @@ namespace DepupOfficeDesktop.Controls
             float w = Width, h = Height;
             if (w < 20 || h < 20) return;
             float stroke = Math.Max(2f, w * 0.03f), L = w * 0.24f;
-            using var corner = new Pen(Color.White, stroke) { StartCap = LineCap.Square, EndCap = LineCap.Square };
+            using var corner = new Pen(Color.FromArgb(200, 255, 255, 255), stroke) { StartCap = LineCap.Square, EndCap = LineCap.Square };
             float x1 = stroke, y1 = stroke, x2 = w - stroke, y2 = h - stroke;
             g.DrawLines(corner, new[] { new PointF(x1, y1 + L), new PointF(x1, y1), new PointF(x1 + L, y1) });
             g.DrawLines(corner, new[] { new PointF(x2 - L, y1), new PointF(x2, y1), new PointF(x2, y1 + L) });
@@ -477,8 +556,10 @@ namespace DepupOfficeDesktop.Controls
 
             float pw = w * 0.5f, ph = h * 0.78f, pl = (w - pw) / 2f, pt = (h - ph) / 2f;
             using (var paper = Theme.RoundedRect(Rectangle.Round(new RectangleF(pl, pt, pw, ph)), (int)(pw * 0.12f)))
-            using (var b = new SolidBrush(Color.White)) g.FillPath(b, paper);
-            using var ink = new Pen(Color.FromArgb(150, 160, 160, 160), Math.Max(2f, w * 0.03f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using (var b = new SolidBrush(Color.FromArgb(46, 255, 255, 255))) g.FillPath(b, paper);
+            using (var paper2 = Theme.RoundedRect(Rectangle.Round(new RectangleF(pl, pt, pw, ph)), (int)(pw * 0.12f)))
+            using (var pp = new Pen(Color.FromArgb(120, 255, 255, 255), 1.2f)) g.DrawPath(pp, paper2);
+            using var ink = new Pen(Color.FromArgb(170, 255, 255, 255), Math.Max(2f, w * 0.03f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             for (int i = 0; i < 5; i++)
             {
                 float y = pt + ph * (0.18f + i * 0.16f);
@@ -508,13 +589,14 @@ namespace DepupOfficeDesktop.Controls
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var r = new RectangleF(0.5f, 0.5f, Width - 2f, Height - 2f);
-            using (var b = new SolidBrush(_hover ? Theme.SOFT : Theme.SURFACE)) g.FillEllipse(b, r);
-            using (var p = new Pen(Theme.LINE)) g.DrawEllipse(p, r);
+            using (var b = new SolidBrush(_hover ? Theme.SURFACE3 : Theme.SURFACE2)) g.FillEllipse(b, r);
+            using (var p = new Pen(_hover ? Theme.BLUE_LINE : Theme.LINE)) g.DrawEllipse(p, r);
 
             float s = Theme.Scale, cx = Width / 2f, cy = Height / 2f;
-            using var pen = new Pen(Theme.TEXT, 1.8f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            g.DrawEllipse(pen, cx - 4.5f * s, cy - 9f * s, 9f * s, 9f * s);
-            g.DrawArc(pen, cx - 8f * s, cy + 1.5f * s, 16f * s, 14f * s, 180, 180);
+            using var pen = new Pen(Theme.TEXT, 1.6f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            float k = Math.Min(Width, Height) / (48f * s);
+            g.DrawEllipse(pen, cx - 4.5f * s * k, cy - 9f * s * k, 9f * s * k, 9f * s * k);
+            g.DrawArc(pen, cx - 8f * s * k, cy + 1.5f * s * k, 16f * s * k, 14f * s * k, 180, 180);
         }
     }
 

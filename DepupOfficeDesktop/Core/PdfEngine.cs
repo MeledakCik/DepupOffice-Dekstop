@@ -959,9 +959,9 @@ namespace DepupOfficeDesktop.Core
                 using var headerFont = new Font("Segoe UI", 36f, FontStyle.Bold, GraphicsUnit.Pixel);
                 using var subFont = new Font("Segoe UI", 22f, FontStyle.Regular, GraphicsUnit.Pixel);
                 using var labelFont = new Font("Segoe UI", 26f, FontStyle.Bold, GraphicsUnit.Pixel);
-                using var headerBrush = new SolidBrush(Theme.TEXT);
-                using var subBrush = new SolidBrush(Theme.MUTED);
-                using var labelBrush = new SolidBrush(Theme.SKY);
+                using var headerBrush = new SolidBrush(Theme.PAPER_INK);
+                using var subBrush = new SolidBrush(Theme.PAPER_MUTED);
+                using var labelBrush = new SolidBrush(Theme.PAPER_SKY);
 
                 g.DrawString("SALINAN KARTU IDENTITAS (KTP / SIM / ID CARD)", headerFont, headerBrush, a4W / 2f, 90f, sfCenter);
                 string stamp = DateTime.Now.ToString("dd MMMM yyyy", new CultureInfo("id-ID"));

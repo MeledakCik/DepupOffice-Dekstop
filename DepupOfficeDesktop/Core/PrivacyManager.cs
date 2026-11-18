@@ -18,7 +18,7 @@ namespace DepupOfficeDesktop.Core
         public const string OfficialGithubUrl = "https://github.com/MeledakCik/DepupOffice";
 
         public const string ComplianceSummaryText =
-            "Depup Office Desktop v2.2.0 - FREE, 100% Offline, Zero Cloud Upload. " +
+            "Depup Office Desktop v4.2.0 - FREE, 100% Offline, Zero Cloud Upload. " +
             "Donasi sukarela via https://saweria.co/depupdonate (tidak membuka fitur premium, diproses di luar aplikasi)";
 
         /// <summary>
@@ -83,7 +83,7 @@ namespace DepupOfficeDesktop.Core
   <meta charset=""UTF-8"" />
   <meta http-equiv=""X-UA-Compatible"" content=""IE=edge"" />
   <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"" />
-  <title>Privacy Policy - Depup Office v2.2.0</title>
+  <title>Privacy Policy - Depup Office v4.2.0</title>
   <style>
     body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #F8FAFC; color: #0F172A; margin: 0; padding: 24px; line-height: 1.65; }
     .container { max-width: 820px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 14px; padding: 32px 36px; }
@@ -102,11 +102,11 @@ namespace DepupOfficeDesktop.Core
   <div class=""container"">
     <div class=""badge"">&#128737; 100% OFFLINE &bull; ZERO CLOUD UPLOAD</div>
     <h1>Privacy Policy &mdash; Depup Office</h1>
-    <p><strong>Versi Aplikasi:</strong> Depup Office Desktop v2.2.0 &amp; Android (<code>cloud.depup.office</code>)<br/>
+    <p><strong>Versi Aplikasi:</strong> Depup Office Desktop v4.2.0 &amp; Android (<code>cloud.depup.office</code>)<br/>
        <strong>Kebijakan Resmi (Live):</strong> <a href=""https://depupoffice-privacy.vercel.app/"">https://depupoffice-privacy.vercel.app/</a></p>
     <div class=""callout"">
       <strong>Ringkasan Privasi Utama:</strong><br/>
-      Depup Office Desktop v2.2.0 adalah aplikasi <strong>FREE (Gratis), 100% Offline, dan Zero Cloud Upload</strong>.
+      Depup Office Desktop v4.2.0 adalah aplikasi <strong>FREE (Gratis), 100% Offline, dan Zero Cloud Upload</strong>.
       Kami tidak mengumpulkan, menyimpan, melacak, atau mengirimkan dokumen maupun data pribadi Anda ke server mana pun.
     </div>
     <h2>1. Pemrosesan Dokumen 100% Lokal (On-Device)</h2>
@@ -136,7 +136,7 @@ namespace DepupOfficeDesktop.Core
       <li><strong>Repositori GitHub:</strong> <a href=""https://github.com/MeledakCik/DepupOffice"">https://github.com/MeledakCik/DepupOffice</a></li>
     </ul>
     <div class=""footer"">
-      &copy; 2026 Depup Office Desktop v2.2.0 &mdash; FREE, 100% Offline, Zero Cloud Upload.
+      &copy; 2026 Depup Office Desktop v4.2.0 &mdash; FREE, 100% Offline, Zero Cloud Upload.
     </div>
   </div>
 </body>
