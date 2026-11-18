@@ -32,6 +32,15 @@ Sumber desain: app Android `C:\Project-App\DepupOffice` — `Ui.kt` (object `C`,
 - Ganti zoom / tema / ukuran jendela membangun ulang tampilan tanpa kedip (penggambaran ditahan sampai selesai).
 - Layar lebar: konten diletakkan di tengah dengan lebar baca maksimum; grid & kolom menyesuaikan lebar.
 
+### Responsif & optimasi lanjutan
+- **Jendela sempit** (dibagi dua layar, laptop kecil, atau zoom besar): sidebar otomatis menjadi **navigasi ringkas ikon saja**
+  (seperti navigation rail Android) dengan tooltip; jarak tepi konten & bilah atas mengecil; kartu penyimpanan & versi di status bar disembunyikan.
+  Kembali lebar otomatis saat jendela diperbesar. Ukuran jendela minimum kini lebih kecil (720×520).
+- **Font di-cache**: tiap ukuran/gaya huruf dibuat sekali lalu dipakai bersama (sebelumnya setiap label & setiap gambar ulang membuat font baru)
+  → jauh lebih sedikit handle GDI, ganti tab / zoom / scroll lebih ringan.
+- Beranda tidak lagi membaca ulang riwayat & folder hasil dari disk setiap kali jendela diubah ukurannya atau di-zoom.
+- Setelah zoom / ganti tema, fokus kembali ke menu (kolom cari tidak ikut aktif sendiri).
+
 ## Khusus desktop
 - Navigasi samping (padanan navigasi bawah), grid 3–4 kolom, dua kolom berdampingan di layar lebar, status bar bawah.
 - Seret berkas ke jendela; Ctrl+K untuk cari; Esc menutup Reader.

@@ -261,16 +261,32 @@ namespace DepupOfficeDesktop.Core
             catch { return false; }
         }
 
+        // Cache font: setiap kombinasi (keluarga, ukuran, gaya) dibuat sekali lalu dipakai bersama.
+        // Sebelumnya tiap label / tiap Paint membuat Font baru → ratusan handle GDI & lambat saat zoom / ganti tab.
+        // Font dari cache TIDAK boleh di-Dispose oleh pemanggil.
+        private static readonly Dictionary<(string, int, FontStyle), Font> FontCache = new();
+        private static readonly object FontGate = new();
+
         private static Font Make(FontFamily? fam, string fallback, float sizePt, FontStyle style)
         {
             LoadFonts();
             sizePt = Math.Max(6f, sizePt * Zoom);   // huruf ikut zoom tampilan
-            if (fam != null)
+            var key = (fam?.Name ?? fallback, (int)Math.Round(sizePt * 100), style);
+            lock (FontGate)
             {
-                try { return new Font(fam, sizePt, style, GraphicsUnit.Point); } catch { }
+                if (FontCache.TryGetValue(key, out var cached)) return cached;
+                Font? f = null;
+                if (fam != null)
+                {
+                    try { f = new Font(fam, sizePt, style, GraphicsUnit.Point); } catch { }
+                }
+                f ??= new Font(fallback, sizePt, style, GraphicsUnit.Point);
+                FontCache[key] = f;
+                return f;
             }
-            return new Font(fallback, sizePt, style, GraphicsUnit.Point);
         }
+
+        private static string? _monoName;
 
         private static string HeadFallback => HasVariable ? "Segoe UI Variable Display Semib" : "Segoe UI Semibold";
         private static string LabelFallback => HasVariable ? "Segoe UI Variable Text Semibold" : "Segoe UI Semibold";
@@ -293,7 +309,10 @@ namespace DepupOfficeDesktop.Core
             => Make(_famRegular, BodyFallback, sizePt, style);
 
         public static Font FontMono(float sizePt = 10f)
-            => new Font(FontExists("Cascadia Mono") ? "Cascadia Mono" : "Consolas", Math.Max(6f, sizePt * Zoom), FontStyle.Regular, GraphicsUnit.Point);
+        {
+            _monoName ??= FontExists("Cascadia Mono") ? "Cascadia Mono" : "Consolas";
+            return Make(null, _monoName, sizePt, FontStyle.Regular);
+        }
 
         // ================= Bentuk =================
 

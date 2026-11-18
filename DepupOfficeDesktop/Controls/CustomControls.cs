@@ -373,6 +373,8 @@ namespace DepupOfficeDesktop.Controls
         /// <summary>Tautan sekunder (teks abu), mis. Privacy / Tentang di bawah sidebar.</summary>
         public bool Muted { get; set; }
         public NavItemIcon Icon { get; set; }
+        /// <summary>Mode ringkas (jendela sempit): hanya ikon di tengah, seperti navigation rail Android.</summary>
+        public bool Compact { get; set; }
         public bool Active { get => _active; set { _active = value; Invalidate(); } }
 
         public NavItem()
@@ -421,12 +423,15 @@ namespace DepupOfficeDesktop.Controls
 
             Color fg = _active ? Color.White : (Muted ? Inactive : Theme.TEXT);
             int chipSize = Theme.S(20);
-            var chip = new Rectangle(Theme.S(16), (Height - chipSize) / 2, chipSize, chipSize);
+            var chip = new Rectangle(Compact ? (Width - chipSize) / 2 : Theme.S(16), (Height - chipSize) / 2, chipSize, chipSize);
             DrawIcon(g, chip, fg);
 
+            if (!Compact)
+            {
             var textRect = new Rectangle(chip.Right + Theme.S(12), 0, Math.Max(1, Width - chip.Right - Theme.S(24)), Height);
             TextRenderer.DrawText(g, Caption, Font, textRect, fg,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+            }
 
             if (Focused && ShowFocusCues)
             {
@@ -606,7 +611,7 @@ namespace DepupOfficeDesktop.Controls
             // petunjuk pintasan
             if (ShortcutZone > Theme.S(20))
             {
-                using var f = Theme.FontMono(8f);
+                var f = Theme.FontMono(8f);
                 var sz = TextRenderer.MeasureText(Shortcut, f, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
                 var kr = new Rectangle(Width - Theme.S(12) - sz.Width - Theme.S(12), (Height - sz.Height - Theme.S(8)) / 2, sz.Width + Theme.S(12), sz.Height + Theme.S(8));
                 using var kp = Theme.RoundedRect(kr, kr.Height / 2);
@@ -1012,7 +1017,7 @@ namespace DepupOfficeDesktop.Controls
             int tx = cr.Right + Theme.S(14);
             int right = Width - Theme.S(14) - (Chevron ? Theme.S(18) : 0) - AccessoryWidth;
             int trailW = 0;
-            using var fTrail = Theme.FontBody(8.5f);
+            var fTrail = Theme.FontBody(8.5f);
             if (!string.IsNullOrEmpty(Trailing))
             {
                 trailW = TextRenderer.MeasureText(Trailing, fTrail).Width + Theme.S(8);
@@ -1020,8 +1025,8 @@ namespace DepupOfficeDesktop.Controls
                     TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
             }
             int tw = Math.Max(Theme.S(40), right - trailW - tx - Theme.S(6));
-            using var fTitle = Theme.FontLabel(10.5f);
-            using var fSub = Theme.FontBody(9f);
+            var fTitle = Theme.FontLabel(10.5f);
+            var fSub = Theme.FontBody(9f);
             bool hasSub = !string.IsNullOrEmpty(Subtitle);
             int th = TextRenderer.MeasureText("Ag", fTitle).Height;
             int sh = hasSub ? TextRenderer.MeasureText("Ag", fSub).Height : 0;

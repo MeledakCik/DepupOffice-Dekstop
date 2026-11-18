@@ -51,7 +51,7 @@ namespace DepupOfficeDesktop.Forms
             Text = "Depup Office Desktop v" + Theme.AppVersion + " — 100% Offline Document, PDF Editor & Vault Suite";
             var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
             Size = new Size(Math.Min(Theme.S(1280), (int)(workArea.Width * 0.92)), Math.Min(Theme.S(840), (int)(workArea.Height * 0.92)));
-            MinimumSize = new Size(Math.Min(Theme.S(940), workArea.Width), Math.Min(Theme.S(640), workArea.Height));
+            MinimumSize = new Size(Math.Min(Theme.S(720), workArea.Width), Math.Min(Theme.S(520), workArea.Height));
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.None; // ukuran diskalakan manual lewat Theme.S()
             KeyPreview = true;
@@ -91,8 +91,16 @@ namespace DepupOfficeDesktop.Forms
             _reflowTimer.Tick += (s, e) =>
             {
                 _reflowTimer.Stop();
-                if (Math.Abs(AvailableWidth() - _builtAvailWidth) > 2)
-                    RenderCurrentTab();
+                if (WantCompactNav() != _compactNav && _activeViewer == null)
+                {
+                    _reflowOnly = true;
+                    try { RebuildShellForDpi(); } finally { _reflowOnly = false; }   // ganti navigasi lebar ↔ ringkas
+                }
+                else if (Math.Abs(AvailableWidth() - _builtAvailWidth) > 2)
+                {
+                    _reflowOnly = true;
+                    try { RenderCurrentTab(); } finally { _reflowOnly = false; }
+                }
             };
 
             // Pindah ke monitor dengan DPI berbeda: hitung ulang seluruh ukuran.

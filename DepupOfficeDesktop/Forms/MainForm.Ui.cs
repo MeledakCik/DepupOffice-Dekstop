@@ -92,32 +92,41 @@ namespace DepupOfficeDesktop.Forms
                 };
             }
 
-            int sideW = S(236);
+            // Responsif: jendela sempit → navigasi ringkas (ikon saja) & jarak tepi lebih kecil.
+            _compactNav = WantCompactNav();
+            bool compact = _compactNav;
+            int sideW = compact ? S(84) : S(236);
 
             // ---------- Navigasi samping (padanan navigasi bawah Android) ----------
             var sidebar = new GlassPane { Dock = DockStyle.Left, Width = sideW, BackColor = Theme.PAGE, Surface = Theme.SURFACE, EdgeLines = AnchorStyles.Right };
             int innerW = sideW - S(32);
 
-            var brand = new Panel { Dock = DockStyle.Top, Height = S(150), BackColor = Theme.PAGE };
-            var logo = new LogoTile { Size = new Size(S(40), S(40)), Location = new Point(S(18), S(20)), Cursor = Cursors.Hand };
+            var brand = new Panel { Dock = DockStyle.Top, Height = compact ? S(136) : S(150), BackColor = Theme.PAGE };
+            var logo = new LogoTile { Size = new Size(S(40), S(40)), Location = new Point(compact ? (sideW - S(40)) / 2 : S(18), S(20)), Cursor = Cursors.Hand };
             logo.Click += (s, e) => SelectTab(TAB_HOME);
             brand.Controls.Add(logo);
-            brand.Controls.Add(L("Depup Office", Theme.FontHead(13.5f), Theme.TEXT, S(68), S(19)));
-            brand.Controls.Add(L("100% offline", Theme.FontBody(9f), Theme.MUTED, S(69), S(41)));
+            if (!compact)
+            {
+                brand.Controls.Add(L("Depup Office", Theme.FontHead(13.5f), Theme.TEXT, S(68), S(19)));
+                brand.Controls.Add(L("100% offline", Theme.FontBody(9f), Theme.MUTED, S(69), S(41)));
+            }
             // Tombol utama (padanan tombol Scan biru di tengah navigasi Android)
-            var btnEditPdf = Theme.CreateButton("Edit PDF", true, Theme.ACCENT, S(46), innerW);
-            btnEditPdf.Font = Theme.FontLabel(10.5f);
-            btnEditPdf.Location = new Point(S(16), S(84));
+            var btnEditPdf = Theme.CreateButton(compact ? "PDF" : "Edit PDF", true, Theme.ACCENT, S(46), compact ? S(56) : innerW);
+            btnEditPdf.Font = Theme.FontLabel(compact ? 9.5f : 10.5f);
+            btnEditPdf.Location = new Point(compact ? (sideW - S(56)) / 2 : S(16), compact ? S(76) : S(84));
+            btnEditPdf.AccessibleName = "Edit PDF";
+            if (compact) _navTips.SetToolTip(btnEditPdf, "Edit PDF");
             btnEditPdf.Click += (s, e) => StartPdfEditorFlow();
             brand.Controls.Add(btnEditPdf);
 
-            var nav = new Panel { Dock = DockStyle.Fill, BackColor = Theme.PAGE, Padding = new Padding(S(16), S(2), S(16), 0) };
+            var nav = new Panel { Dock = DockStyle.Fill, BackColor = Theme.PAGE, Padding = compact ? new Padding(S(12), S(2), S(12), 0) : new Padding(S(16), S(2), S(16), 0) };
             string[] navNames = { "Beranda", "Dokumen", "Buat", "Alat", "Saya" };
             NavItemIcon[] navIcons = { NavItemIcon.Home, NavItemIcon.Docs, NavItemIcon.Create, NavItemIcon.Tools, NavItemIcon.User };
             for (int i = navNames.Length - 1; i >= 0; i--)   // Dock=Top: yang ditambahkan terakhir berada paling atas
             {
                 int idx = i;
-                var item = new NavItem { Caption = navNames[i], Icon = navIcons[i], Dock = DockStyle.Top, Height = S(50) };
+                var item = new NavItem { Caption = navNames[i], Icon = navIcons[i], Dock = DockStyle.Top, Height = S(50), Compact = compact, AccessibleName = navNames[i] };
+                if (compact) _navTips.SetToolTip(item, navNames[i]);
                 item.Click += (s, e) => SelectTab(idx);
                 _navItems[idx] = item;
                 nav.Controls.Add(item);
@@ -142,7 +151,8 @@ namespace DepupOfficeDesktop.Forms
             bottom.Controls.Add(storeCard);
 
             sidebar.Controls.Add(nav);
-            sidebar.Controls.Add(bottom);
+            if (!compact) sidebar.Controls.Add(bottom);
+            else bottom.Dispose();
             sidebar.Controls.Add(brand);
 
             // ---------- Area kanan: bilah atas + konten ----------
@@ -184,7 +194,7 @@ namespace DepupOfficeDesktop.Forms
             avatar.BringToFront();
             _layoutTopBar = () =>
             {
-                int padX = S(32);
+                int padX = compact ? S(18) : S(32);
                 int h = topBar.ClientSize.Height;
                 int wAll = topBar.ClientSize.Width;
                 avatar.Location = new Point(wAll - padX - avatar.Width, (h - avatar.Height) / 2);
@@ -200,7 +210,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                Padding = new Padding(S(32), S(6), S(32), S(32)),
+                Padding = compact ? new Padding(S(18), S(6), S(18), S(24)) : new Padding(S(32), S(6), S(32), S(32)),
                 BackColor = Theme.PAGE,
                 AllowDrop = true
             };
@@ -221,7 +231,7 @@ namespace DepupOfficeDesktop.Forms
             var status = new GlassPane { Dock = DockStyle.Bottom, Height = S(28), BackColor = Theme.GlassOn ? Theme.PAGE : Theme.SURFACE, Surface = Theme.SURFACE, EdgeLines = AnchorStyles.Top };
             Label StatusText(string text, Color color, DockStyle dock)
             {
-                using var f = Theme.FontBody(8.5f);
+                var f = Theme.FontBody(8.5f);
                 return new Label
                 {
                     Text = text,
@@ -239,7 +249,7 @@ namespace DepupOfficeDesktop.Forms
                 };
             }
             status.Controls.Add(StatusText("Hasil disimpan di " + AppStorage.OutDir, Theme.MUTED, DockStyle.Fill));
-            status.Controls.Add(StatusText($"Depup Office {Theme.AppVersion}  ·  Tema {(Theme.Mode == Theme.MODE_SYSTEM ? "ikut Windows" : Theme.Dark ? "gelap" : "terang")}", Theme.MUTED, DockStyle.Right));
+            if (!compact) status.Controls.Add(StatusText($"Depup Office {Theme.AppVersion}  ·  Tema {(Theme.Mode == Theme.MODE_SYSTEM ? "ikut Windows" : Theme.Dark ? "gelap" : "terang")}", Theme.MUTED, DockStyle.Right));
             var zoomLbl = StatusText($"Zoom {Math.Round(Theme.Zoom * 100)}%   Ctrl + / Ctrl −", Theme.MUTED, DockStyle.Right);
             zoomLbl.Cursor = Cursors.Hand;
             zoomLbl.Click += (s, e) => ChangeZoom(1f);   // klik = kembali ke 100%
@@ -258,6 +268,15 @@ namespace DepupOfficeDesktop.Forms
         }
 
         private bool _initialFocusHooked;
+        private bool _compactNav;
+        private bool _reflowOnly;
+        private List<DocumentHistoryEntity>? _homeRecent;
+        private int _homeOutCount;
+        private static readonly System.Globalization.CultureInfo IdCulture = new("id-ID");
+        private readonly ToolTip _navTips = new() { InitialDelay = 300 };
+
+        /// <summary>Navigasi ringkas bila area jendela sempit (mis. jendela dibagi dua layar / laptop kecil).</summary>
+        private bool WantCompactNav() => ClientSize.Width > 0 && ClientSize.Width < S(1080);
 
         /// <summary>Ganti zoom antarmuka (Ctrl + / Ctrl − / Ctrl 0) lalu bangun ulang tampilan.</summary>
         private void ChangeZoom(float z)
@@ -265,7 +284,8 @@ namespace DepupOfficeDesktop.Forms
             if (Math.Abs(z - Theme.Zoom) < 0.001f) { Theme.Toast(this, $"Zoom {Math.Round(Theme.Zoom * 100)}%"); return; }
             Theme.SetZoom(z);
             Theme.SetDpi(DeviceDpi);
-            RebuildShellForDpi();
+            _reflowOnly = true;
+            try { RebuildShellForDpi(); } finally { _reflowOnly = false; }
             Theme.Toast(this, $"Zoom tampilan {Math.Round(Theme.Zoom * 100)}%  •  Ctrl + / Ctrl − / Ctrl 0");
         }
 
@@ -298,7 +318,8 @@ namespace DepupOfficeDesktop.Forms
                 BuildShell();
                 ResumeLayout(true);
                 SelectTab(_currentTab);
-                if (_navItems.TryGetValue(_currentTab, out var nav)) nav.Focus();   // fokus tidak lari ke kolom cari
+                // fokus tidak lari ke kolom cari (Windows memindahkan fokus ke kontrol pertama saat yang lama dibuang)
+                BeginInvoke(new Action(() => { if (_navItems.TryGetValue(_currentTab, out var nav) && !nav.IsDisposed) nav.Focus(); }));
             }
             finally
             {
@@ -601,15 +622,21 @@ namespace DepupOfficeDesktop.Forms
 
             // ---- Sapaan: tanggal, "Selamat siang," + "mau kerjakan apa?" (persis Android) ----
             var greet = new Panel { Width = w, Margin = new Padding(0, S(20), 0, S(20)) };
-            var dateLbl = L(DateTime.Now.ToString("dddd, d MMMM", new System.Globalization.CultureInfo("id-ID")), Theme.FontBody(11.5f), Theme.MUTED, 0, 0);
+            var dateLbl = L(DateTime.Now.ToString("dddd, d MMMM", IdCulture), Theme.FontBody(11.5f), Theme.MUTED, 0, 0);
             var g1 = L(Greeting() + ",", Theme.FontDisplay(30f), Theme.TEXT, -S(3), dateLbl.PreferredHeight + S(6));
             var g2 = L("mau kerjakan apa?", Theme.FontDisplay(30f), Theme.MUTED, -S(3), g1.Top + g1.PreferredHeight - S(10));
             greet.Controls.AddRange(new Control[] { dateLbl, g1, g2 });
             greet.Height = g2.Top + g2.PreferredHeight;
             p.Controls.Add(greet);
 
-            var recent = GetHistorySnapshot().Where(entry => File.Exists(entry.FilePath)).ToList();
-            int outCount = AppStorage.GetOutFiles().Count;
+            // Data beranda (riwayat + jumlah hasil) membaca disk: saat hanya menyusun ulang (resize / zoom) pakai data terakhir.
+            if (!_reflowOnly || _homeRecent == null)
+            {
+                _homeRecent = GetHistorySnapshot().Where(entry => File.Exists(entry.FilePath)).ToList();
+                _homeOutCount = AppStorage.GetOutFiles().Count;
+            }
+            var recent = _homeRecent;
+            int outCount = _homeOutCount;
 
             // ---- Kartu biru (padanan kartu "Scan dokumen") + 2 ubin angka. PC: berdampingan; sempit: bertumpuk ----
             int gap = S(16);

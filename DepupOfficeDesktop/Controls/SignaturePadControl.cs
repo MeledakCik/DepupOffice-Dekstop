@@ -76,7 +76,7 @@ namespace DepupOfficeDesktop.Controls
 
             if (_strokes.Count == 0)
             {
-                using var hintFont = Theme.FontBody(9.5f, FontStyle.Italic);
+                var hintFont = Theme.FontBody(9.5f, FontStyle.Italic);
                 using var hintBrush = new SolidBrush(Theme.PAPER_MUTED);
                 var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                 g.DrawString("Goreskan tanda tangan Anda di sini menggunakan mouse / stylus...", hintFont, hintBrush, ClientRectangle, sf);
