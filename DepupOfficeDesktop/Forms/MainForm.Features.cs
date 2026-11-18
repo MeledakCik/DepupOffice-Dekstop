@@ -322,7 +322,7 @@ namespace DepupOfficeDesktop.Forms
             var g = new DataGridView
             {
                 Height = SS(height), AllowUserToAddRows = true, AllowUserToDeleteRows = true, RowHeadersWidth = SS(28),
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, BackgroundColor = Color.White, Font = Theme.FontBody(9.5f),
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, Font = Theme.FontBody(9.5f),
                 BorderStyle = BorderStyle.FixedSingle, SelectionMode = DataGridViewSelectionMode.CellSelect
             };
             foreach (var h in headers) g.Columns.Add(h, h);
@@ -775,7 +775,7 @@ namespace DepupOfficeDesktop.Forms
             using var d = new Dlg("Ringkasan Dokumen", $"{words} kata • {name}", 680, 760);
             d.Label("Poin-poin utama / ringkasan (ekstraktif, 100% offline):", true);
             var box = d.Field("", string.Join("\r\n\r\n", points.Select((p, i) => $"{i + 1}. {p}")), false, true, 14);
-            box.ReadOnly = true; box.BackColor = Color.White;
+            box.ReadOnly = true; box.BackColor = Theme.FIELD; box.ForeColor = Theme.TEXT;
             if (AiText.LooksLikeInjection(text)) d.Label("⚠ Dokumen berisi kalimat yang tampak seperti instruksi tersembunyi untuk AI — kalimat tersebut tidak dimasukkan ke ringkasan.", false, Theme.RED);
             d.Action("Simpan PDF Ringkasan", true, () =>
             {

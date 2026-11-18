@@ -351,7 +351,7 @@ namespace DepupOfficeDesktop.Forms
             top.Controls.AddRange(new Control[] { back, _titleLbl, right });
 
             // ---- toolbar format
-            var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = S(46), BackColor = Theme.SURFACE, WrapContents = false, AutoScroll = false, Padding = new Padding(S(10), S(2), S(10), 0) };
+            var bar = new FlowLayoutPanel { Dock = DockStyle.Top, BackColor = Theme.SURFACE, WrapContents = true, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, AutoScroll = false, Padding = new Padding(S(10), S(2), S(10), S(6)) };  // membungkus ke baris kedua seperti ribbon saat jendela sempit
             _cmbStyle = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = S(150), Font = Theme.FontBody(9.5f), Margin = new Padding(S(2), S(8), S(4), 0) };
             foreach (StdStyle s in Enum.GetValues(typeof(StdStyle))) _cmbStyle.Items.Add(StdStyles.Label(s));
             _cmbStyle.SelectionChangeCommitted += (s, e) => { ApplyStyle((StdStyle)_cmbStyle.SelectedIndex); _current?.Focus(); };
@@ -407,7 +407,8 @@ namespace DepupOfficeDesktop.Forms
             status.Controls.Add(_statusLbl); status.Controls.Add(zf);
 
             // ---- kertas
-            _scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.BG };
+            _scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.CANVAS };
+            Theme.DarkScrollbars(_scroll);
             _paper = new Panel { BackColor = Color.White };
             _bodyFlow = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.White, Margin = Padding.Empty, Padding = Padding.Empty };
             _bodyFlow.SizeChanged += (s, e) => LayoutPaper();
@@ -496,7 +497,7 @@ namespace DepupOfficeDesktop.Forms
 
         private Control MakeBreakBlock(EBreak br)
         {
-            var l = new Label { Width = TextWidthPx, Height = Theme.S(22), Text = "──────── Pemisah halaman ────────", TextAlign = ContentAlignment.MiddleCenter, ForeColor = Theme.MUTED, Font = Theme.FontBody(8.5f), Tag = br };
+            var l = new Label { Width = TextWidthPx, Height = Theme.S(22), Text = "──────── Pemisah halaman ────────", TextAlign = ContentAlignment.MiddleCenter, ForeColor = Theme.PAPER_MUTED, Font = Theme.FontBody(8.5f), Tag = br };
             l.ContextMenuStrip = BlockMenu(br, "pemisah halaman");
             return l;
         }
@@ -1302,7 +1303,7 @@ namespace DepupOfficeDesktop.Forms
                 int w = im.Cx > 0 ? (int)(im.Cx / 12700.0 * 96 / 72 * _ed.PxScale) : _ed.PxScale > 0 ? (int)(120 * _ed.PxScale) : 120;
                 int h = im.Cy > 0 ? (int)(im.Cy / 12700.0 * 96 / 72 * _ed.PxScale) : w;
                 if (w > _width) { h = (int)(h * (double)_width / w); w = _width; }
-                var pb = new PictureBox { Size = new Size(Math.Max(8, w), Math.Max(8, h)), SizeMode = PictureBoxSizeMode.Zoom, Image = img, BackColor = img == null ? Theme.SOFT : Color.Transparent, Margin = new Padding(0, 2, 6, 2), Cursor = Cursors.Hand };
+                var pb = new PictureBox { Size = new Size(Math.Max(8, w), Math.Max(8, h)), SizeMode = PictureBoxSizeMode.Zoom, Image = img, BackColor = img == null ? Theme.PAPER_SOFT : Color.Transparent, Margin = new Padding(0, 2, 6, 2), Cursor = Cursors.Hand };
                 var m = new ContextMenuStrip();
                 var imRef = im;
                 m.Items.Add("Hapus gambar", null, (s, e) => { _ed.Snapshot(); Box.Para.Images.Remove(imRef); _ed.MarkDirty(); BuildImages(); Relayout(); });
@@ -1310,7 +1311,7 @@ namespace DepupOfficeDesktop.Forms
                 _imgs.Controls.Add(pb);
             }
             if (p.HasObject)
-                _imgs.Controls.Add(new Label { Text = "▣ kotak teks / bentuk dipertahankan", AutoSize = true, ForeColor = Theme.MUTED, Font = Theme.FontBody(8f), Margin = new Padding(0, 2, 0, 2) });
+                _imgs.Controls.Add(new Label { Text = "▣ kotak teks / bentuk dipertahankan", AutoSize = true, ForeColor = Theme.PAPER_MUTED, Font = Theme.FontBody(8f), Margin = new Padding(0, 2, 0, 2) });
             _imgs.Visible = _imgs.Controls.Count > 0;
         }
 
@@ -1647,7 +1648,7 @@ namespace DepupOfficeDesktop.Forms
                             panel.Controls.Add(new Label
                             {
                                 Text = "⊞ berisi tabel di dalam sel — teks bisa diedit, susunan tabel dalamnya tetap utuh saat disimpan",
-                                AutoSize = true, MaximumSize = new Size(w, 0), ForeColor = Theme.MUTED, Font = Theme.FontBody(8f), Margin = new Padding(0, 0, 0, 4)
+                                AutoSize = true, MaximumSize = new Size(w, 0), ForeColor = Theme.PAPER_MUTED, Font = Theme.FontBody(8f), Margin = new Padding(0, 0, 0, 4)
                             });
                         if (cell.Paras.Count == 0) cell.Paras.Add(EPara.Blank(-1, new ParaFmt()));
                         foreach (var p in cell.Paras)

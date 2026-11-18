@@ -73,7 +73,7 @@ namespace DepupOfficeDesktop.Forms
             Size = new Size(1040, 780);
             MinimumSize = new Size(780, 560);
             StartPosition = FormStartPosition.CenterParent;
-            BackColor = ColorTranslator.FromHtml("#E9EDF7");
+            BackColor = Theme.BG;
 
             if (_isPdf && File.Exists(_filePath))
             {
@@ -155,7 +155,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 Text = _pdfPages.Count > 0 ? $"Hal 1 / {_pdfPages.Count}" : "Dokumen",
                 Font = Theme.FontLabel(9f),
-                ForeColor = Theme.ACCENT,
+                ForeColor = Theme.ACCENT_LIGHT,
                 BackColor = Theme.BLUE_BG,
                 AutoSize = true,
                 Padding = new Padding(S(8), S(3), S(8), S(3)),
@@ -196,7 +196,7 @@ namespace DepupOfficeDesktop.Forms
                 _marked = AppStorage.ToggleBookmark(_filePath);
                 _btnBookmark.Text = _marked ? "★ Ditandai" : "☆ Tandai";
                 _btnBookmark.BackColor = _marked ? Theme.ACCENT : Theme.BLUE_BG;
-                _btnBookmark.ForeColor = _marked ? Color.White : Theme.ACCENT;
+                _btnBookmark.ForeColor = _marked ? Color.White : Theme.ACCENT_LIGHT;
             });
             var btnVoice = Act("🔊 Voice Reader", false, Theme.TEAL, StartVoiceReader);
             var btnPrint = Act("🖨️ Cetak", false, Theme.ACCENT, PrintCurrentDocument);
@@ -316,7 +316,7 @@ namespace DepupOfficeDesktop.Forms
             _ => Color.White
         };
 
-        private Color GetPaperForeColor() => _paperTheme == 1 ? Color.White : Theme.TEXT;
+        private Color GetPaperForeColor() => _paperTheme == 1 ? Color.White : Theme.PAPER_INK;
 
         private void SetZoom(float z)
         {
@@ -835,7 +835,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var lbl = new Label
@@ -891,6 +891,7 @@ namespace DepupOfficeDesktop.Forms
             };
 
             dlg.Controls.AddRange(new Control[] { lbl, pad, lblPos, cmbPos, btnLib, btnClear, btnApply });
+            Theme.ScaleRawDialog(dlg);
             dlg.ShowDialog(DlgOwner);
         }
 
@@ -938,7 +939,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
             var lbl = new Label { Text = label, Location = new Point(18, 18), AutoSize = true, Font = Theme.FontLabel(9.5f) };
             var txt = new TextBox { Text = defaultVal, Location = new Point(18, 46), Width = 345, Font = Theme.FontBody(10f) };
@@ -947,6 +948,7 @@ namespace DepupOfficeDesktop.Forms
             string? result = null;
             btnOk.Click += (s, e) => { result = txt.Text.Trim(); f.DialogResult = DialogResult.OK; f.Close(); };
             f.Controls.AddRange(new Control[] { lbl, txt, btnOk });
+            Theme.ScaleRawDialog(f);
             return f.ShowDialog(DlgOwner) == DialogResult.OK ? result : null;
         }
     }

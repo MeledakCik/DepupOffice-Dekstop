@@ -73,7 +73,7 @@ namespace DepupOfficeDesktop.Forms
             Size = new Size(1020, 720);
             MinimumSize = new Size(780, 520);
             StartPosition = FormStartPosition.CenterParent;
-            BackColor = Theme.SURFACE2;
+            BackColor = Theme.BG;
 
             BuildUi(initialTitle);
             SyncFormulaBar();
@@ -130,7 +130,7 @@ namespace DepupOfficeDesktop.Forms
                 for (int c = 0; c < _numCols; c++)
                 {
                     string val = c < row.Count ? row[c] : "";
-                    list.Add(new SheetCell(val, isBold, isBold ? Theme.SURFACE2 : Color.White));
+                    list.Add(new SheetCell(val, isBold, isBold ? Theme.SHEET_HEAD : Color.White));
                 }
                 _matrix.Add(list);
             }
@@ -155,7 +155,7 @@ namespace DepupOfficeDesktop.Forms
             for (int r = 0; r < defaultRows.Length; r++)
             {
                 var rList = new List<SheetCell>();
-                Color bg = r == 0 ? Theme.SURFACE2 : (r == 5 ? Theme.SKY_BG : Color.White);
+                Color bg = r == 0 ? Theme.SHEET_HEAD : (r == 5 ? Theme.SHEET_TOTAL : Color.White);
                 bool bold = r == 0 || r == 5;
                 foreach (string v in defaultRows[r])
                     rList.Add(new SheetCell(v, bold, bg));
@@ -167,17 +167,17 @@ namespace DepupOfficeDesktop.Forms
         {
             _matrix.Clear();
             _numCols = 4;
-            _matrix.Add(new List<SheetCell> { new("No Invoice", true, Theme.SURFACE2), new("Klien", true, Theme.SURFACE2), new("Jatuh Tempo", true, Theme.SURFACE2), new("Total Tagihan", true, Theme.SURFACE2) });
+            _matrix.Add(new List<SheetCell> { new("No Invoice", true, Theme.SHEET_HEAD), new("Klien", true, Theme.SHEET_HEAD), new("Jatuh Tempo", true, Theme.SHEET_HEAD), new("Total Tagihan", true, Theme.SHEET_HEAD) });
             _matrix.Add(new List<SheetCell> { new("INV-001"), new("PT Depup Tech"), new("28 Okt 2026"), new("15000000") });
             _matrix.Add(new List<SheetCell> { new("INV-002"), new("CV Jaya Abadi"), new("30 Okt 2026"), new("8500000") });
-            _matrix.Add(new List<SheetCell> { new("TOTAL", true, Theme.SKY_BG), new("", false, Theme.SKY_BG), new("", false, Theme.SKY_BG), new("=SUM(D2:D3)", true, Theme.SKY_BG) });
+            _matrix.Add(new List<SheetCell> { new("TOTAL", true, Theme.SHEET_TOTAL), new("", false, Theme.SHEET_TOTAL), new("", false, Theme.SHEET_TOTAL), new("=SUM(D2:D3)", true, Theme.SHEET_TOTAL) });
         }
 
         private void LoadPresensiTemplate()
         {
             _matrix.Clear();
             _numCols = 4;
-            _matrix.Add(new List<SheetCell> { new("Nama Karyawan", true, Theme.SURFACE2), new("Hadir", true, Theme.SURFACE2), new("Izin", true, Theme.SURFACE2), new("Status", true, Theme.SURFACE2) });
+            _matrix.Add(new List<SheetCell> { new("Nama Karyawan", true, Theme.SHEET_HEAD), new("Hadir", true, Theme.SHEET_HEAD), new("Izin", true, Theme.SHEET_HEAD), new("Status", true, Theme.SHEET_HEAD) });
             _matrix.Add(new List<SheetCell> { new("Budi Pratama"), new("22"), new("0"), new("Lengkap") });
             _matrix.Add(new List<SheetCell> { new("Siti Aminah"), new("21"), new("1"), new("Izin Sakit") });
             _matrix.Add(new List<SheetCell> { new("Andi Wijaya"), new("22"), new("0"), new("Lengkap") });
@@ -301,7 +301,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 Dock = DockStyle.Top,
                 Height = 44,
-                BackColor = ColorTranslator.FromHtml("#E2E8F0"),
+                BackColor = Theme.SURFACE,
                 Padding = new Padding(14, 5, 14, 5),
                 FlowDirection = FlowDirection.LeftToRight
             };
@@ -309,7 +309,6 @@ namespace DepupOfficeDesktop.Forms
             Button ToolBtn(string label, Action onClick)
             {
                 var b = Theme.CreateButton(label, false, Theme.TEXT, 32);
-                b.BackColor = Color.White;
                 b.Click += (s, e) => onClick();
                 return b;
             }
@@ -375,7 +374,7 @@ namespace DepupOfficeDesktop.Forms
                 ToolBtn("Warna Biru", () =>
                 {
                     EnsureCell(_activeRow, _activeCol);
-                    _matrix[_activeRow][_activeCol].BgColor = Theme.SKY_BG;
+                    _matrix[_activeRow][_activeCol].BgColor = Theme.SHEET_TOTAL;
                     RenderGrid();
                 }),
                 ToolBtn("Warna Putih", () =>
@@ -391,7 +390,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 Dock = DockStyle.Fill,
                 Padding = new Padding(16),
-                BackColor = Theme.SURFACE2
+                BackColor = Theme.CANVAS
             };
 
             _grid = new DataGridView
@@ -826,7 +825,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var lblCurr = new Label { Text = "Simbol Mata Uang:", Font = Theme.FontLabel(10f), Location = new Point(20, 24), AutoSize = true };
@@ -857,6 +856,7 @@ namespace DepupOfficeDesktop.Forms
             };
 
             dlg.Controls.AddRange(new Control[] { lblCurr, cmbCurr, chkGrid, btnSave });
+            Theme.ScaleRawDialog(dlg);
             dlg.ShowDialog(this);
         }
 

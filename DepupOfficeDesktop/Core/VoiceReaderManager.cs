@@ -193,7 +193,7 @@ namespace DepupOfficeDesktop.Core
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var root = new Panel { Dock = DockStyle.Fill, Padding = new Padding(22) };
@@ -224,8 +224,8 @@ namespace DepupOfficeDesktop.Core
                 Multiline = true,
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical,
-                BackColor = Theme.BG,
-                ForeColor = ColorTranslator.FromHtml("#334155"),
+                BackColor = Theme.FIELD,
+                ForeColor = Theme.TEXT,
                 Font = Theme.FontBody(10f),
                 BorderStyle = BorderStyle.FixedSingle,
                 Location = new Point(22, 74),
@@ -415,6 +415,7 @@ namespace DepupOfficeDesktop.Core
             dlg.FormClosing += (s, e) => reader.Dispose();
             root.Controls.Add(btnPlay);
             root.Controls.Add(btnStop);
+            Theme.ScaleRawDialog(dlg);
             dlg.ShowDialog(owner);
         }
     }

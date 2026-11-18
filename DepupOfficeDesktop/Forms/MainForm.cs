@@ -48,7 +48,7 @@ namespace DepupOfficeDesktop.Forms
             // Skala DPI harus ditetapkan sebelum satu pun kontrol dibuat.
             Theme.SetDpi(DeviceDpi);
 
-            Text = "Depup Office Desktop v4.1.0 — 100% Offline Document, PDF Editor & Vault Suite";
+            Text = "Depup Office Desktop v" + Theme.AppVersion + " — 100% Offline Document, PDF Editor & Vault Suite";
             var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
             Size = new Size(Math.Min(Theme.S(1280), (int)(workArea.Width * 0.92)), Math.Min(Theme.S(840), (int)(workArea.Height * 0.92)));
             MinimumSize = new Size(Math.Min(Theme.S(940), workArea.Width), Math.Min(Theme.S(640), workArea.Height));
@@ -217,6 +217,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 _openingDocument = true;
                 try { await OpenProtectedDocumentAsync(filePath); }
+                catch (Exception ex) { MessageBox.Show(this, $"Dokumen terlindungi tidak dapat dibuka:\n{ex.Message}", "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 finally { _openingDocument = false; _lastActionTick = Environment.TickCount64; }
                 RenderCurrentTab();
                 return;
@@ -240,6 +241,12 @@ namespace DepupOfficeDesktop.Forms
 
                 AppStorage.AddRecent(filePath);
                 await ShowViewerEmbeddedAsync(filePath);
+            }
+            catch (Exception ex)
+            {
+                // berkas rusak / format tidak terbaca: jangan sampai menutup aplikasi
+                CloseEmbeddedViewer();
+                MessageBox.Show(this, $"Berkas tidak dapat dibuka:\n{Path.GetFileName(filePath)}\n\n{ex.Message}", "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally
             {
@@ -314,7 +321,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
             var lbl = new Label { Text = "Nama berkas baru:", Location = new Point(18, 18), AutoSize = true, Font = Theme.FontLabel(9.5f) };
             var txt = new TextBox { Text = AppStorage.BaseName(Path.GetFileName(filePath)), Location = new Point(18, 46), Width = 365, Font = Theme.FontBody(10f) };
@@ -346,7 +353,7 @@ namespace DepupOfficeDesktop.Forms
                 }
             };
             dlg.Controls.AddRange(new Control[] { lbl, txt, btn });
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         private void StartPdfEditorFlow()
@@ -400,7 +407,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
             var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(20) };
             flow.Controls.Add(new Label { Text = "Pilih tindakan untuk berkas PDF ini:", Font = Theme.FontLabel(10f), AutoSize = true, Margin = new Padding(0, 0, 0, 10) });
@@ -424,7 +431,7 @@ namespace DepupOfficeDesktop.Forms
             AddAct("✍️ Bubuhkan Tanda Tangan Digital", () => SignPdfForFile(first));
 
             dlg.Controls.Add(flow);
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         // --- 1. Gabung PDF ---
@@ -453,7 +460,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var lb = new ListBox { Location = new Point(20, 44), Size = new Size(460, 240), Font = Theme.FontBody(10f) };
@@ -498,7 +505,7 @@ namespace DepupOfficeDesktop.Forms
             };
 
             dlg.Controls.AddRange(new Control[] { lb, btnUp, btnDown, btnMerge });
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         // --- 2. Pisah PDF ---
@@ -521,7 +528,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             dlg.Controls.Add(new Label { Text = $"{Path.GetFileName(pdfPath)} (Total: {pages} halaman)", Font = Theme.FontLabel(10f), Location = new Point(20, 18), AutoSize = true });
@@ -548,7 +555,7 @@ namespace DepupOfficeDesktop.Forms
             };
 
             dlg.Controls.AddRange(new Control[] { numFrom, numTo, btnSplit });
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         // --- 3. Susun & Hapus Halaman PDF ---
@@ -571,7 +578,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             dlg.Controls.Add(new Label { Text = $"Susun urutan, putar 90°, atau hapus halaman ({Path.GetFileName(pdfPath)}):", Font = Theme.FontLabel(9.5f), Location = new Point(20, 16), AutoSize = true });
@@ -641,7 +648,7 @@ namespace DepupOfficeDesktop.Forms
             };
 
             dlg.Controls.AddRange(new Control[] { lb, bUp, bDown, bRot, bDel, bSave });
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         // --- 4. Sedot Foto PDF ---
@@ -674,7 +681,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             dlg.Controls.Add(new Label
@@ -716,7 +723,7 @@ namespace DepupOfficeDesktop.Forms
             };
 
             dlg.Controls.AddRange(new Control[] { rbTarget, cmbTarget, rbLevel, cmbLevel, btnCompress });
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         // --- 7. Konversi Massal (Batch) ---
@@ -760,7 +767,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var pad = new Panel { Dock = DockStyle.Fill, Padding = new Padding(22) };
@@ -793,7 +800,7 @@ namespace DepupOfficeDesktop.Forms
                 Location = new Point(140, 96),
                 Size = new Size(260, 260),
                 SizeMode = PictureBoxSizeMode.Zoom,
-                BackColor = Color.White,
+                BackColor = Theme.SURFACE,
                 BorderStyle = BorderStyle.FixedSingle
             };
             pad.Controls.Add(pbQr);
@@ -853,7 +860,7 @@ namespace DepupOfficeDesktop.Forms
 
             dlg.FormClosed += (s, e) => currentQrBmp?.Dispose();
             dlg.Controls.Add(pad);
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         // --- 10. Kunci & Enkripsi ke Brankas ---
@@ -917,7 +924,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var txtTitle = new TextBox { PlaceholderText = "Judul Dokumen (opsional)", Location = new Point(20, 20), Width = 500, Font = Theme.FontHead(12f) };
@@ -939,7 +946,7 @@ namespace DepupOfficeDesktop.Forms
             };
 
             dlg.Controls.AddRange(new Control[] { txtTitle, txtBody, btnCreate });
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         // --- Bubuhkan Tanda Tangan ke PDF ---
@@ -962,7 +969,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             dlg.Controls.Add(new Label { Text = "Gambar tanda tangan di kotak putih:", Location = new Point(20, 16), AutoSize = true, Font = Theme.FontLabel(9.5f) });
@@ -1010,7 +1017,7 @@ namespace DepupOfficeDesktop.Forms
                 RenderCurrentTab();
             };
             dlg.Controls.AddRange(new Control[] { pad, btnClear, btnLib, numPage, cmbPos, btnApply });
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         // --- Modal Hasil Olahan (ResultSheet di Ui.kt) ---
@@ -1025,7 +1032,7 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(22) };
@@ -1061,7 +1068,7 @@ namespace DepupOfficeDesktop.Forms
 
             flow.Controls.AddRange(new Control[] { btnOpen, btnSaveDl, btnVault, btnExplorer });
             dlg.Controls.Add(flow);
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         // --- Manajer Folder DepupOffice (showFolderExplorerSheet di MainActivity.kt) ---
@@ -1207,7 +1214,7 @@ namespace DepupOfficeDesktop.Forms
             RenderFolderList();
             dlg.Controls.Add(listFlow);
             dlg.Controls.Add(topPanel);
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
 
         private void ShowSearchDialog()
@@ -1228,24 +1235,38 @@ namespace DepupOfficeDesktop.Forms
             PrivacyManager.OpenSaweriaDonation();
         }
 
+        /// <summary>
+        /// Dialog di jendela utama ditulis dalam piksel 96 DPI. Di layar 125% / 150% / 200% huruf ikut membesar,
+        /// jadi ukuran & posisi kontrol diskalakan juga agar teks tidak terpotong.
+        /// </summary>
+        private void ShowScaledDialog(Form dlg)
+        {
+            if (Math.Abs(Theme.Scale - 1f) > 0.01f)
+            {
+                dlg.AutoScaleMode = AutoScaleMode.None;
+                dlg.Scale(new SizeF(Theme.Scale, Theme.Scale));
+            }
+            dlg.ShowDialog(this);
+        }
+
         private void ShowAboutDialog()
         {
             using var dlg = new Form
             {
-                Text = "Tentang Depup Office Desktop v4.1.0",
+                Text = "Tentang Depup Office Desktop v" + Theme.AppVersion,
                 Size = new Size(560, 360),
                 StartPosition = FormStartPosition.CenterParent,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                BackColor = Color.White
+                BackColor = Theme.SURFACE
             };
 
             var pad = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24) };
 
             var lblTitle = new Label
             {
-                Text = "🚀 Depup Office Desktop v4.1.0",
+                Text = "🚀 Depup Office Desktop v" + Theme.AppVersion,
                 Font = Theme.FontHead(15f),
                 ForeColor = Theme.ACCENT,
                 Location = new Point(24, 18),
@@ -1287,7 +1308,7 @@ namespace DepupOfficeDesktop.Forms
 
             pad.Controls.AddRange(new Control[] { lblTitle, lblCompliance, lblDetails, btnPrivacy, btnSaweria, btnEmail });
             dlg.Controls.Add(pad);
-            dlg.ShowDialog(this);
+            ShowScaledDialog(dlg);
         }
     }
 }

@@ -11,6 +11,19 @@ namespace DepupOfficeDesktop
         static void Main(string[] args)
         {
             ApplicationConfiguration.Initialize();
+            Theme.InstallAutoTheme();          // tema gelap "glass" untuk semua jendela & dialog
+
+            // Galat tak terduga di satu fitur tidak boleh menutup seluruh aplikasi: tampilkan pesan, lanjutkan.
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) =>
+            {
+                try
+                {
+                    MessageBox.Show($"Terjadi kesalahan dan proses dibatalkan:\n\n{e.Exception.Message}",
+                        "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                catch { }
+            };
             AppStorage.Initialize();
             ProtectedDoc.CleanupLeftovers();   // salinan terdekripsi yang tertinggal (aplikasi ditutup paksa)
 

@@ -29,7 +29,7 @@ namespace DepupOfficeDesktop.Forms
             MaximizeBox = MinimizeBox = false;
             ShowInTaskbar = false;
             AutoScaleMode = AutoScaleMode.None;
-            BackColor = Color.White;
+            BackColor = Theme.SURFACE;
             KeyPreview = true;
             KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Close(); };
             var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
@@ -43,15 +43,18 @@ namespace DepupOfficeDesktop.Forms
             Body = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true,
-                Padding = new Padding(S(20), S(12), S(8), S(8)), BackColor = Color.White
+                Padding = new Padding(S(20), S(12), S(8), S(8)), BackColor = Theme.SURFACE
             };
             _actions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Padding = new Padding(S(16), S(10), S(16), S(12)), BackColor = Theme.SURFACE, WrapContents = true
             };
+            Theme.DarkScrollbars(Body);
             Controls.Add(Body);
+            Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = Theme.LINE });
             Controls.Add(_actions);
+            Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Theme.LINE });
             Controls.Add(head);
             ClientSize = new Size(w, Math.Min(S(maxHeight), wa.Height - S(60)));
             Shown += (s, e) => FitHeight(maxHeight);
@@ -92,7 +95,8 @@ namespace DepupOfficeDesktop.Forms
             var t = new TextBox
             {
                 Text = value, Font = Theme.FontBody(10.5f), UseSystemPasswordChar = password, Multiline = multiline,
-                ScrollBars = multiline ? ScrollBars.Vertical : ScrollBars.None
+                ScrollBars = multiline ? ScrollBars.Vertical : ScrollBars.None,
+                BackColor = Theme.FIELD, ForeColor = Theme.TEXT, BorderStyle = BorderStyle.FixedSingle
             };
             if (multiline) t.Height = S(22) * lines;
             return Add(t);
@@ -107,7 +111,7 @@ namespace DepupOfficeDesktop.Forms
         public ComboBox Choice(string label, IEnumerable<string> items, int selected = 0)
         {
             if (!string.IsNullOrEmpty(label)) Label(label);
-            var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Font = Theme.FontBody(10f) };
+            var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Font = Theme.FontBody(10f), FlatStyle = FlatStyle.Flat, BackColor = Theme.FIELD, ForeColor = Theme.TEXT };
             c.Items.AddRange(items.Cast<object>().ToArray());
             if (c.Items.Count > 0) c.SelectedIndex = Math.Clamp(selected, 0, c.Items.Count - 1);
             return Add(c);
@@ -116,7 +120,7 @@ namespace DepupOfficeDesktop.Forms
         public NumericUpDown Number(string label, decimal min, decimal max, decimal value)
         {
             if (!string.IsNullOrEmpty(label)) Label(label);
-            var n = new NumericUpDown { Minimum = min, Maximum = max, Value = Math.Clamp(value, min, max), Font = Theme.FontBody(10f), Width = S(140) };
+            var n = new NumericUpDown { Minimum = min, Maximum = max, Value = Math.Clamp(value, min, max), Font = Theme.FontBody(10f), Width = S(140), BackColor = Theme.FIELD, ForeColor = Theme.TEXT, BorderStyle = BorderStyle.FixedSingle };
             Body.Controls.Add(n); n.Margin = new Padding(0, 0, 0, S(6));
             return n;
         }
@@ -191,7 +195,7 @@ namespace DepupOfficeDesktop.Forms
             using var f = new Form
             {
                 FormBorderStyle = FormBorderStyle.FixedDialog, ControlBox = false, StartPosition = FormStartPosition.CenterParent,
-                ClientSize = new Size(S(420), S(118)), BackColor = Color.White, ShowInTaskbar = false, Text = "Depup Office", AutoScaleMode = AutoScaleMode.None
+                ClientSize = new Size(S(420), S(118)), BackColor = Theme.SURFACE, ShowInTaskbar = false, Text = "Depup Office", AutoScaleMode = AutoScaleMode.None
             };
             var lbl = new Label { UseMnemonic = false, Text = message, Font = Theme.FontLabel(10f), ForeColor = Theme.TEXT, Location = new Point(S(20), S(18)), Size = new Size(S(380), S(24)), AutoEllipsis = true };
             var bar = new ProgressBar { Location = new Point(S(20), S(52)), Size = new Size(S(380), S(16)), Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30 };

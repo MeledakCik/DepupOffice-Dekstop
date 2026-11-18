@@ -1,17 +1,24 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace DepupOfficeDesktop.Core
 {
     /// <summary>
-    /// Palet Depup v4.1 — sama dengan token Android (Ui.kt, object C, tema terang):
-    /// minimalis netral-hangat. Halaman abu batu muda, kartu putih rata tanpa gradien, satu aksen biru royal,
-    /// warna kategori dipakai kecil-kecil (ikon di wadah lembut).
+    /// Palet Depup Office Desktop v4.2 — "Glass Navy".
+    /// Permukaan navy gelap berlapis (gaya kaca transparan), satu aksen biru, gradasi biru → ungu untuk elemen utama.
+    /// Kertas dokumen (Word/PDF/Excel/cetak) tetap putih dengan tinta gelap: lihat konstanta PAPER_* / SHEET_*.
+    /// Rangka mengikuti kebiasaan aplikasi kantor profesional (WPS / MS Word / Adobe Acrobat): kanvas gelap di sekeliling
+    /// halaman putih, toolbar rapat, status bar di bawah.
     /// </summary>
     public static class Theme
     {
+        public const string AppVersion = "4.2.0";
+        public const string AppName = "Depup Office Desktop";
+
         /// <summary>Faktor skala DPI layar (1.0 = 96 DPI, 1.5 = 150%, dst).</summary>
         public static float Scale { get; private set; } = 1f;
 
@@ -22,47 +29,94 @@ namespace DepupOfficeDesktop.Core
 
         private static Color H(string hex) => ColorTranslator.FromHtml(hex);
 
-        // ---------- Permukaan ----------
-        public static readonly Color BG = H("#F1F0EC");          // latar halaman
-        public static readonly Color SURFACE = H("#FFFFFF");     // kartu, navigasi
-        public static readonly Color SURFACE2 = H("#E8E6E1");    // isian, chip, trek
-        public static readonly Color SURFACE3 = H("#DCD9D3");    // ditekan / terpilih netral
-        public static readonly Color SOFT = H("#F3F2EE");        // wadah ikon netral di dalam kartu putih
-        public static readonly Color LINE = H("#E4E2DD");        // pemisah tipis
-        public static readonly Color LINE_STRONG = H("#84817B");
+        // ---------- Permukaan (gelap, berlapis) ----------
+        public static readonly Color BG = H("#0B1120");          // latar halaman / kanvas aplikasi
+        public static readonly Color SIDEBAR = H("#080D19");     // sidebar & status bar (lebih gelap)
+        public static readonly Color SURFACE = H("#111A2C");     // kartu kaca, dialog, toolbar
+        public static readonly Color SURFACE_HI = H("#16213A");  // bagian atas kartu kaca (gradasi kilau)
+        public static readonly Color SURFACE2 = H("#18233A");    // isian, chip, trek, tombol sekunder
+        public static readonly Color SURFACE3 = H("#22304D");    // ditekan / terpilih netral / hover
+        public static readonly Color SOFT = H("#152038");        // wadah ikon netral di dalam kartu
+        public static readonly Color FIELD = H("#0E1729");       // kotak isian teks
+        public static readonly Color LINE = H("#1F2B44");        // tepi kaca / pemisah tipis
+        public static readonly Color LINE_STRONG = H("#3A4B6B");
+        /// <summary>Kanvas di sekeliling halaman dokumen (seperti Acrobat / Word mode gelap).</summary>
+        public static readonly Color CANVAS = H("#0D1424");
 
-        // ---------- Aksen biru royal ----------
-        public static readonly Color ACCENT = H("#1652F6");
-        public static readonly Color ACCENT_DARK = H("#0F43D4");
-        public static readonly Color BRAND = H("#0037FF");       // ubin logo
-        public static readonly Color BLUE_BG = H("#E8EEFF");     // wadah lembut biru
-        public static readonly Color BLUE_LINE = H("#C9D6FF");
+        // ---------- Aksen ----------
+        public static readonly Color ACCENT = H("#3B7BF6");
+        public static readonly Color ACCENT_DARK = H("#2563EB");
+        public static readonly Color ACCENT_LIGHT = H("#7EA8FF");
+        public static readonly Color VIOLET = H("#7C4DFF");      // ujung gradasi merek (biru → ungu)
+        public static readonly Color BRAND = H("#2F6BF2");       // ubin logo
+        public static readonly Color BLUE_BG = H("#16284A");     // wadah lembut biru
+        public static readonly Color BLUE_LINE = H("#2A4A85");
+        public static readonly Color CYAN = H("#22D3EE");        // penanda aktif / status
 
-        // ---------- Tinta & teks ----------
-        public static readonly Color INK = H("#111111");
-        public static readonly Color TEXT = H("#111111");
-        public static readonly Color MUTED = H("#65625D");
+        // ---------- Tinta & teks (di atas permukaan gelap) ----------
+        public static readonly Color INK = H("#E8EDF7");
+        public static readonly Color TEXT = H("#E8EDF7");
+        public static readonly Color MUTED = H("#8C99B3");
+        public static readonly Color FAINT = H("#5D6B86");
 
-        // ---------- Kategori (ikon di wadah lembut) ----------
-        public static readonly Color RED = H("#B0472F");         // PDF
-        public static readonly Color RED_BG = H("#F5E6E1");
-        public static readonly Color TEAL = H("#35754C");        // Excel
-        public static readonly Color TEAL_BG = H("#E3EEE6");
-        public static readonly Color INDIGO = H("#72539E");      // gambar / lain-lain
-        public static readonly Color INDIGO_BG = H("#ECE6F3");
-        public static readonly Color SKY = H("#33609F");         // Word
-        public static readonly Color SKY_BG = H("#E4EAF3");
-        public static readonly Color AMBER = H("#8A4508");
-        public static readonly Color AMBER_BG = H("#FDF0CC");
-        public static readonly Color ERROR = H("#C0262D");
-        public static readonly Color ERROR_BG = H("#FCE4E4");
-        public static readonly Color SUCCESS = H("#15703A");
-        public static readonly Color SUCCESS_BG = H("#DCF5E4");
+        // ---------- Kategori (ikon terang di wadah gelap bernuansa) ----------
+        public static readonly Color RED = H("#F2685C");         // PDF
+        public static readonly Color RED_BG = H("#3A1D25");
+        public static readonly Color TEAL = H("#2DBE8A");        // Excel
+        public static readonly Color TEAL_BG = H("#11312A");
+        public static readonly Color INDIGO = H("#A385FF");      // gambar / lain-lain
+        public static readonly Color INDIGO_BG = H("#2A2350");
+        public static readonly Color SKY = H("#5B9DFF");         // Word
+        public static readonly Color SKY_BG = H("#152B4D");
+        public static readonly Color AMBER = H("#F5B23D");
+        public static readonly Color AMBER_BG = H("#3A2C12");
+        public static readonly Color ERROR = H("#F2685C");
+        public static readonly Color ERROR_BG = H("#3A1D25");
+        public static readonly Color SUCCESS = H("#2DBE8A");
+        public static readonly Color SUCCESS_BG = H("#11312A");
+
+        // ---------- Kertas: isi dokumen, cetak, berkas hasil (TIDAK ikut tema gelap) ----------
+        public static readonly Color PAPER = Color.White;
+        public static readonly Color PAPER_INK = H("#111111");
+        public static readonly Color PAPER_MUTED = H("#65625D");
+        public static readonly Color PAPER_LINE = H("#E4E2DD");
+        public static readonly Color PAPER_ACCENT = H("#1652F6");
+        public static readonly Color PAPER_SKY = H("#33609F");
+        public static readonly Color PAPER_SOFT = H("#E8E6E1");
+        /// <summary>Sel judul & total di lembar Excel (ikut tersimpan ke berkas, jadi tetap terang).</summary>
+        public static readonly Color SHEET_HEAD = H("#E8E6E1");
+        public static readonly Color SHEET_TOTAL = H("#E4EAF3");
 
         // Tema Reader Kertas & Eye-Care (ViewerActivity.kt)
         public static readonly Color NIGHT_BG = H("#0F0F0E");
         public static readonly Color SEPIA_BG = H("#FBF0D9");
         public static readonly Color EYECARE_GREEN_BG = H("#E2F0D9");
+
+        // ================= Warna pembantu =================
+
+        /// <summary>Luminans relatif (0 = hitam, 1 = putih).</summary>
+        public static double Luma(Color c) => (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255.0;
+
+        /// <summary>Warna teks yang terbaca di atas <paramref name="bg"/> (putih atau navy gelap).</summary>
+        public static Color ReadableOn(Color bg) => Luma(bg) > 0.62 ? H("#0B1120") : Color.White;
+
+        /// <summary>Campur dua warna; t = 0 → a, t = 1 → b.</summary>
+        public static Color Mix(Color a, Color b, double t)
+        {
+            t = Math.Clamp(t, 0, 1);
+            return Color.FromArgb(
+                (int)Math.Round(a.R + (b.R - a.R) * t),
+                (int)Math.Round(a.G + (b.G - a.G) * t),
+                (int)Math.Round(a.B + (b.B - a.B) * t));
+        }
+
+        /// <summary>Wadah lembut bernuansa warna di atas permukaan gelap (mis. tombol sekunder berwarna).</summary>
+        public static Color Tint(Color c) => Mix(SURFACE, c, 0.18);
+
+        /// <summary>Versi warna yang cukup terang untuk dipakai sebagai teks di atas permukaan gelap.</summary>
+        public static Color OnDark(Color c) => Luma(c) < 0.45 ? Mix(c, Color.White, 0.45) : c;
+
+        // ================= Huruf =================
 
         // Font: Android memakai Funnel Display; padanan bawaan Windows 11 = Segoe UI Variable (fallback Segoe UI).
         private static readonly bool HasVariable = FontExists("Segoe UI Variable Display");
@@ -89,7 +143,9 @@ namespace DepupOfficeDesktop.Core
             => new Font(BodyFamily, sizePt, style, GraphicsUnit.Point);
 
         public static Font FontMono(float sizePt = 10f)
-            => new Font("Consolas", sizePt, FontStyle.Regular, GraphicsUnit.Point);
+            => new Font(FontExists("Cascadia Mono") ? "Cascadia Mono" : "Consolas", sizePt, FontStyle.Regular, GraphicsUnit.Point);
+
+        // ================= Bentuk =================
 
         public static GraphicsPath RoundedRect(Rectangle bounds, int radius)
         {
@@ -109,27 +165,63 @@ namespace DepupOfficeDesktop.Core
             return path;
         }
 
+        /// <summary>
+        /// Tombol membulat. <paramref name="filled"/> = tombol utama (isi warna penuh, teks kontras otomatis);
+        /// selain itu tombol sekunder bernuansa warna (gaya tombol "tonal" di WPS / Office).
+        /// </summary>
         public static Button CreateButton(string text, bool filled = true, Color? accent = null, int height = 40, int width = 0)
         {
             Color col = accent ?? ACCENT;
+            bool neutral = col.ToArgb() == TEXT.ToArgb() || col.ToArgb() == MUTED.ToArgb() || Luma(col) > 0.85 && !filled;
+            Color back, fore, border;
+            if (filled)
+            {
+                back = col;
+                fore = ReadableOn(col);
+                border = col;
+            }
+            else if (neutral)
+            {
+                back = SURFACE2;
+                fore = TEXT;
+                border = LINE;
+            }
+            else
+            {
+                back = Tint(col);
+                fore = OnDark(col);
+                border = Mix(SURFACE, col, 0.35);
+            }
+
             var btn = new DepupOfficeDesktop.Controls.PillButton
             {
                 Text = text,
                 FlatStyle = FlatStyle.Flat,
                 Font = FontLabel(10f),
-                BackColor = filled ? col : BLUE_BG,
-                ForeColor = filled ? Color.White : col,
+                BackColor = back,
+                ForeColor = fore,
                 Height = height,
                 Cursor = Cursors.Hand,
                 AutoSize = width == 0,
                 Padding = new Padding(12, 4, 12, 4),
                 UseVisualStyleBackColor = false,
-                CornerRadius = 999   // pil penuh (gaya Android)
+                CornerRadius = 10
             };
             if (width > 0) btn.Width = width;
-            btn.FlatAppearance.BorderSize = 0;
-            btn.FlatAppearance.BorderColor = filled ? col : BLUE_LINE;
+            btn.FlatAppearance.BorderSize = filled ? 0 : 1;
+            btn.FlatAppearance.BorderColor = border;
             return btn;
+        }
+
+        /// <summary>
+        /// Dialog lama yang ukurannya ditulis dalam piksel 96 DPI: skalakan bentuk & posisi kontrolnya
+        /// mengikuti DPI layar (huruf sudah berskala sendiri) sebelum ditampilkan.
+        /// </summary>
+        public static void ScaleRawDialog(Form dlg)
+        {
+            if (Math.Abs(Scale - 1f) < 0.01f) return;
+            dlg.AutoScaleMode = AutoScaleMode.None;
+            dlg.Scale(new SizeF(Scale, Scale));
         }
 
         public static void Toast(Control? owner, string message)
@@ -141,15 +233,18 @@ namespace DepupOfficeDesktop.Core
                 {
                     Text = "  " + message + "  ",
                     AutoSize = true,
-                    BackColor = INK,
-                    ForeColor = Color.White,
+                    MaximumSize = new Size(Math.Max(S(240), f.ClientSize.Width - S(80)), 0),
+                    BackColor = SURFACE3,
+                    ForeColor = TEXT,
                     Font = FontLabel(10f),
-                    Padding = new Padding(S(14), S(8), S(14), S(8))
+                    UseMnemonic = false,
+                    Padding = new Padding(S(14), S(9), S(14), S(9))
                 };
                 f.Controls.Add(banner);
                 banner.BringToFront();
-                banner.Location = new Point(Math.Max(S(20), (f.ClientSize.Width - banner.PreferredWidth) / 2), f.ClientSize.Height - S(70));
-                var t = new System.Windows.Forms.Timer { Interval = 2600 };
+                var pref = banner.PreferredSize;
+                banner.Location = new Point(Math.Max(S(20), (f.ClientSize.Width - pref.Width) / 2), Math.Max(S(10), f.ClientSize.Height - pref.Height - S(56)));
+                var t = new System.Windows.Forms.Timer { Interval = 2800 };
                 t.Tick += (s, e) =>
                 {
                     t.Stop();
@@ -165,5 +260,354 @@ namespace DepupOfficeDesktop.Core
                 MessageBox.Show(message, "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
+
+        // =====================================================================
+        //  Tema otomatis untuk SEMUA jendela (termasuk dialog yang dibuat cepat dengan `new Form { ... }`):
+        //  bilah judul gelap (DWM), menu konteks gelap, dan isian / tombol / label bawaan yang disesuaikan
+        //  agar terbaca di atas permukaan gelap. Kertas dokumen (kontrol berlatar putih) tidak disentuh.
+        // =====================================================================
+
+        private static IntPtr _cbtHook = IntPtr.Zero;
+        private static HookProc? _cbtProc;
+        private static readonly HashSet<IntPtr> _themedForms = new();
+
+        /// <summary>Pasang tema otomatis. Panggil sekali di Program.Main sebelum jendela pertama dibuat.</summary>
+        public static void InstallAutoTheme()
+        {
+            try { ToolStripManager.Renderer = new DarkToolStripRenderer(); } catch { }
+            if (_cbtHook != IntPtr.Zero) return;
+            try
+            {
+                _cbtProc = CbtCallback;
+                _cbtHook = SetWindowsHookEx(WH_CBT, _cbtProc, IntPtr.Zero, GetCurrentThreadId());
+                Application.ApplicationExit += (s, e) =>
+                {
+                    if (_cbtHook != IntPtr.Zero) UnhookWindowsHookEx(_cbtHook);
+                    _cbtHook = IntPtr.Zero;
+                };
+            }
+            catch
+            {
+                _cbtHook = IntPtr.Zero;
+            }
+        }
+
+        private static IntPtr CbtCallback(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode == HCBT_ACTIVATE)
+            {
+                try
+                {
+                    if (Control.FromHandle(wParam) is Form form && _themedForms.Add(form.Handle))
+                    {
+                        IntPtr h = form.Handle;
+                        form.HandleDestroyed += (s, e) => _themedForms.Remove(h);
+                        StyleForm(form);
+                    }
+                }
+                catch
+                {
+                    // tema tidak boleh menggagalkan pembukaan jendela
+                }
+            }
+            return CallNextHookEx(_cbtHook, nCode, wParam, lParam);
+        }
+
+        /// <summary>Terapkan tema gelap pada sebuah form beserta kontrol bawaannya (aman dipanggil berulang).</summary>
+        public static void StyleForm(Form form)
+        {
+            ApplyWindowChrome(form);
+            FitToScreen(form);
+            if (IsDefaultBack(form.BackColor) || form.BackColor.ToArgb() == Color.White.ToArgb())
+                form.BackColor = SURFACE;
+            if (form.ForeColor == SystemColors.ControlText || Luma(form.ForeColor) < 0.35 && Luma(form.BackColor) < 0.3)
+                form.ForeColor = TEXT;
+            StyleTree(form);
+        }
+
+        /// <summary>Jendela yang lebih besar dari layar (laptop / skala 125–150%) diperkecil & ditengahkan agar tidak terpotong.</summary>
+        public static void FitToScreen(Form form)
+        {
+            try
+            {
+                if (!form.TopLevel || form.WindowState != FormWindowState.Normal) return;
+                var wa = Screen.FromControl(form).WorkingArea;
+                if (form.Width <= wa.Width && form.Height <= wa.Height && wa.Contains(form.Bounds)) return;
+                int w = Math.Min(form.Width, (int)(wa.Width * 0.96));
+                int h = Math.Min(form.Height, (int)(wa.Height * 0.96));
+                if (form.MinimumSize.Width > w || form.MinimumSize.Height > h)
+                    form.MinimumSize = new Size(Math.Min(form.MinimumSize.Width, w), Math.Min(form.MinimumSize.Height, h));
+                form.Size = new Size(w, h);
+                form.Location = new Point(wa.Left + (wa.Width - w) / 2, wa.Top + (wa.Height - h) / 2);
+            }
+            catch { }
+        }
+
+        /// <summary>Bilah judul gelap (Windows 10 20H1+) dan warna keterangan navy (Windows 11).</summary>
+        public static void ApplyWindowChrome(Form form)
+        {
+            void Apply()
+            {
+                try
+                {
+                    int on = 1;
+                    if (DwmSetWindowAttribute(form.Handle, 20, ref on, sizeof(int)) != 0)
+                        DwmSetWindowAttribute(form.Handle, 19, ref on, sizeof(int));
+                    int caption = ColorTranslator.ToWin32(form is DepupOfficeDesktop.Forms.MainForm ? SIDEBAR : SURFACE);
+                    DwmSetWindowAttribute(form.Handle, 35, ref caption, sizeof(int));   // DWMWA_CAPTION_COLOR
+                    int border = ColorTranslator.ToWin32(LINE);
+                    DwmSetWindowAttribute(form.Handle, 34, ref border, sizeof(int));    // DWMWA_BORDER_COLOR
+                    int text = ColorTranslator.ToWin32(TEXT);
+                    DwmSetWindowAttribute(form.Handle, 36, ref text, sizeof(int));      // DWMWA_TEXT_COLOR
+                }
+                catch { }
+            }
+            if (form.IsHandleCreated) Apply();
+            else form.HandleCreated += (s, e) => Apply();
+        }
+
+        private static bool IsDefaultBack(Color c) => c == SystemColors.Control || c == SystemColors.ButtonFace;
+
+        private static Color EffectiveBack(Control c)
+        {
+            for (Control? x = c; x != null; x = x.Parent)
+                if (x.BackColor.A == 255) return x.BackColor;
+            return SURFACE;
+        }
+
+        /// <summary>Kontrol berlatar putih eksplisit = kertas dokumen / pratinjau: biarkan apa adanya.</summary>
+        private static bool IsPaper(Control c) =>
+            c is not Form && !c.BackColor.IsSystemColor && c.BackColor.ToArgb() == Color.White.ToArgb()
+            || c.Tag is string tag && tag == "paper";
+
+        private static void StyleTree(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                try { StyleControl(c); }
+                catch { /* satu kontrol gagal diberi tema tidak boleh menghentikan yang lain */ }
+            }
+            root.ControlAdded -= OnControlAdded;
+            root.ControlAdded += OnControlAdded;
+        }
+
+        private static void OnControlAdded(object? sender, ControlEventArgs e)
+        {
+            try { if (e.Control != null) StyleControl(e.Control); } catch { }
+        }
+
+        private static void StyleControl(Control c)
+        {
+            if (IsPaper(c)) return;
+
+            switch (c)
+            {
+                case DepupOfficeDesktop.Controls.PillButton:
+                    return; // sudah bergaya sendiri
+
+                case RichTextBox:
+                    if (c.BackColor == SystemColors.Window) { c.BackColor = FIELD; c.ForeColor = TEXT; }
+                    DarkScrollbars(c);
+                    return;
+
+                case TextBoxBase tb:
+                    if (c.BackColor == SystemColors.Window || c.BackColor == SystemColors.Control && tb.ReadOnly)
+                    {
+                        c.BackColor = FIELD;
+                        c.ForeColor = TEXT;
+                        if (tb.BorderStyle == BorderStyle.Fixed3D) tb.BorderStyle = BorderStyle.FixedSingle;
+                    }
+                    if (tb.Multiline) DarkScrollbars(c);
+                    return;
+
+                case ComboBox cb:
+                    if (c.BackColor == SystemColors.Window)
+                    {
+                        c.BackColor = FIELD;
+                        c.ForeColor = TEXT;
+                        cb.FlatStyle = FlatStyle.Flat;
+                    }
+                    return;
+
+                case ListBox:
+                case ListView:
+                case TreeView:
+                    if (c.BackColor == SystemColors.Window) { c.BackColor = FIELD; c.ForeColor = TEXT; }
+                    if (c is ListBox lb && lb.BorderStyle == BorderStyle.Fixed3D) lb.BorderStyle = BorderStyle.FixedSingle;
+                    DarkScrollbars(c);
+                    return;
+
+                case UpDownBase ud:
+                    if (c.BackColor == SystemColors.Window) { c.BackColor = FIELD; c.ForeColor = TEXT; }
+                    if (ud.BorderStyle == BorderStyle.Fixed3D) ud.BorderStyle = BorderStyle.FixedSingle;
+                    return;
+
+                case DataGridView g:
+                    StyleGrid(g);
+                    return;
+
+                case Button b:
+                    if (IsDefaultBack(b.BackColor))
+                    {
+                        b.UseVisualStyleBackColor = false;
+                        b.FlatStyle = FlatStyle.Flat;
+                        b.BackColor = SURFACE2;
+                        b.ForeColor = TEXT;
+                        b.FlatAppearance.BorderColor = LINE_STRONG;
+                        b.FlatAppearance.MouseOverBackColor = SURFACE3;
+                        b.FlatAppearance.MouseDownBackColor = LINE_STRONG;
+                        b.Cursor = Cursors.Hand;
+                    }
+                    else if (Luma(b.ForeColor) < 0.35 && Luma(b.BackColor) < 0.3)
+                        b.ForeColor = TEXT;
+                    return;
+
+                case Label:
+                case CheckBox:
+                case RadioButton:
+                case GroupBox:
+                    FixTextContrast(c);
+                    if (c is GroupBox) StyleTree(c);
+                    return;
+
+                case PictureBox:
+                case WebBrowser:
+                    return;
+            }
+
+            if (c is ToolStrip) return;           // digambar oleh DarkToolStripRenderer
+            if (c is ScrollableControl sc && sc.AutoScroll) DarkScrollbars(c);
+            if (c.GetType().Namespace?.StartsWith("Microsoft.Web") == true) return;
+            StyleTree(c);
+        }
+
+        private static void FixTextContrast(Control c)
+        {
+            Color bg = EffectiveBack(c);
+            if (Luma(bg) < 0.3 && Luma(c.ForeColor) < 0.4)
+                c.ForeColor = TEXT;
+        }
+
+        private static void StyleGrid(DataGridView g)
+        {
+            // Hanya tabel dengan warna bawaan; lembar kerja / tabel di atas kertas (putih, sepia, dll.) dibiarkan.
+            if (g.BackgroundColor != SystemColors.AppWorkspace) return;
+            g.BackgroundColor = FIELD;
+            g.BorderStyle = BorderStyle.None;
+            g.GridColor = LINE;
+            g.EnableHeadersVisualStyles = false;
+            if (g.DefaultCellStyle.BackColor == SystemColors.Window || g.DefaultCellStyle.BackColor.IsEmpty)
+            {
+                g.DefaultCellStyle.BackColor = FIELD;
+                g.DefaultCellStyle.ForeColor = TEXT;
+            }
+            g.DefaultCellStyle.SelectionBackColor = BLUE_LINE;
+            g.DefaultCellStyle.SelectionForeColor = Color.White;
+            g.ColumnHeadersDefaultCellStyle.BackColor = SURFACE2;
+            g.ColumnHeadersDefaultCellStyle.ForeColor = TEXT;
+            g.ColumnHeadersDefaultCellStyle.SelectionBackColor = SURFACE2;
+            g.RowHeadersDefaultCellStyle.BackColor = SURFACE2;
+            g.RowHeadersDefaultCellStyle.ForeColor = MUTED;
+            g.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+        }
+
+        /// <summary>Scrollbar gelap gaya Windows Explorer mode gelap (diabaikan bila tidak didukung OS).</summary>
+        public static void DarkScrollbars(Control c)
+        {
+            void Apply() { try { SetWindowTheme(c.Handle, "DarkMode_Explorer", null); } catch { } }
+            if (c.IsHandleCreated) Apply();
+            else c.HandleCreated += (s, e) => Apply();
+        }
+
+        /// <summary>Menu konteks / toolstrip gelap dengan sorotan aksen.</summary>
+        private sealed class DarkToolStripRenderer : ToolStripProfessionalRenderer
+        {
+            public DarkToolStripRenderer() : base(new DarkColors()) { RoundedEdges = false; }
+
+            protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+            {
+                if (e.Item.ForeColor == SystemColors.ControlText || Luma(e.Item.ForeColor) < 0.4)
+                    e.TextColor = e.Item.Enabled ? TEXT : FAINT;
+                base.OnRenderItemText(e);
+            }
+
+            protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+            {
+                e.ArrowColor = MUTED;
+                base.OnRenderArrow(e);
+            }
+
+            protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+            {
+                var r = new Rectangle(e.ImageRectangle.X - 2, e.ImageRectangle.Y - 2, e.ImageRectangle.Width + 4, e.ImageRectangle.Height + 4);
+                using (var b = new SolidBrush(BLUE_BG)) e.Graphics.FillRectangle(b, r);
+                using var p = new Pen(ACCENT_LIGHT, 2f);
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                int cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2;
+                e.Graphics.DrawLines(p, new[] { new Point(cx - 5, cy), new Point(cx - 1, cy + 4), new Point(cx + 6, cy - 4) });
+            }
+        }
+
+        private sealed class DarkColors : ProfessionalColorTable
+        {
+            public override Color ToolStripDropDownBackground => SURFACE;
+            public override Color ImageMarginGradientBegin => SURFACE;
+            public override Color ImageMarginGradientMiddle => SURFACE;
+            public override Color ImageMarginGradientEnd => SURFACE;
+            public override Color MenuBorder => LINE_STRONG;
+            public override Color MenuItemBorder => BLUE_LINE;
+            public override Color MenuItemSelected => SURFACE3;
+            public override Color MenuItemSelectedGradientBegin => SURFACE3;
+            public override Color MenuItemSelectedGradientEnd => SURFACE3;
+            public override Color MenuItemPressedGradientBegin => SURFACE2;
+            public override Color MenuItemPressedGradientMiddle => SURFACE2;
+            public override Color MenuItemPressedGradientEnd => SURFACE2;
+            public override Color MenuStripGradientBegin => SURFACE;
+            public override Color MenuStripGradientEnd => SURFACE;
+            public override Color ToolStripBorder => LINE;
+            public override Color ToolStripGradientBegin => SURFACE;
+            public override Color ToolStripGradientMiddle => SURFACE;
+            public override Color ToolStripGradientEnd => SURFACE;
+            public override Color ToolStripContentPanelGradientBegin => BG;
+            public override Color ToolStripContentPanelGradientEnd => BG;
+            public override Color SeparatorDark => LINE;
+            public override Color SeparatorLight => LINE;
+            public override Color ButtonSelectedHighlight => SURFACE3;
+            public override Color ButtonSelectedGradientBegin => SURFACE3;
+            public override Color ButtonSelectedGradientMiddle => SURFACE3;
+            public override Color ButtonSelectedGradientEnd => SURFACE3;
+            public override Color ButtonSelectedBorder => BLUE_LINE;
+            public override Color ButtonPressedGradientBegin => SURFACE2;
+            public override Color ButtonPressedGradientMiddle => SURFACE2;
+            public override Color ButtonPressedGradientEnd => SURFACE2;
+            public override Color CheckBackground => BLUE_BG;
+            public override Color CheckSelectedBackground => BLUE_BG;
+            public override Color StatusStripGradientBegin => SIDEBAR;
+            public override Color StatusStripGradientEnd => SIDEBAR;
+        }
+
+        // ================= Win32 =================
+
+        private const int WH_CBT = 5;
+        private const int HCBT_ACTIVATE = 5;
+        private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hWnd, string? pszSubAppName, string? pszSubIdList);
     }
 }
