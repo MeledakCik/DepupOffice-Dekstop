@@ -333,9 +333,8 @@ namespace DepupOfficeDesktop.Forms
 
         private void RenderCurrentTab()
         {
-            Redraw.Suspend(_contentHost);
-            try { RenderCurrentTabCore(); }
-            finally { Redraw.Resume(_contentHost); }
+            RenderCurrentTabCore();
+            _contentHost.Invalidate(true);
         }
 
         private void RenderCurrentTabCore()

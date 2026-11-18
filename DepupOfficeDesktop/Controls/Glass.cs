@@ -219,6 +219,36 @@ namespace DepupOfficeDesktop.Controls
         /// </summary>
         protected override Point ScrollToControl(Control activeControl) => DisplayRectangle.Location;
 
+        private const int WM_HSCROLL = 0x0114, WM_VSCROLL = 0x0115, WM_MOUSEWHEEL = 0x020A, WM_MOUSEHWHEEL = 0x020E;
+
+        /// <summary>
+        /// Setelah posisi gulir berubah (roda mouse, seret scrollbar, tombol panah scrollbar), gambar ulang seluruh area
+        /// yang tampak beserta semua kartu di dalamnya. Ini mencegah sisa gambar lama ("garis-garis") yang muncul bila
+        /// Windows hanya menggeser piksel tetapi kontrol transparan di dalamnya tidak ikut digambar ulang.
+        /// </summary>
+        protected override void WndProc(ref Message m)
+        {
+            Point before = AutoScrollPosition;
+            base.WndProc(ref m);
+            if (m.Msg is WM_VSCROLL or WM_HSCROLL or WM_MOUSEWHEEL or WM_MOUSEHWHEEL && AutoScrollPosition != before)
+                RepaintAll();
+        }
+
+        protected override void OnScroll(ScrollEventArgs se)
+        {
+            base.OnScroll(se);
+            RepaintAll();
+        }
+
+        private void RepaintAll()
+        {
+            if (!IsHandleCreated) return;
+            // RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW
+            RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero, 0x0001 | 0x0004 | 0x0080 | 0x0100);
+        }
+
+        [DllImport("user32.dll")] private static extern bool RedrawWindow(IntPtr hWnd, IntPtr rect, IntPtr rgn, uint flags);
+
         protected override void Dispose(bool disposing)
         {
             if (disposing) Backdrop.Dispose();
