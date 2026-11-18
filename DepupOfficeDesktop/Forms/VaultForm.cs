@@ -362,11 +362,9 @@ namespace DepupOfficeDesktop.Forms
                     MessageBox.Show(this, $"Berkas tidak dapat dihapus: {ex.Message}", "Brankas", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             };
-            var tip = new ToolTip();
-            tip.SetToolTip(btnOpen, "Buka (didekripsi sementara)");
-            tip.SetToolTip(btnExport, "Ekspor salinan terdekripsi ke Documents\\DepupOffice\\Salinan");
-            tip.SetToolTip(btnDel, "Hapus permanen dari Brankas");
-            row.Disposed += (s, e) => tip.Dispose();
+            btnOpen.AccessibleName = "Buka (didekripsi sementara)";
+            btnExport.AccessibleName = "Ekspor salinan terdekripsi";
+            btnDel.AccessibleName = "Hapus permanen dari Brankas";
 
             row.Controls.AddRange(new Control[] { chip, lblName, lblMeta, btnOpen, btnExport, btnDel });
             row.AttachHover();

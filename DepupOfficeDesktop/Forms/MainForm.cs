@@ -17,12 +17,12 @@ namespace DepupOfficeDesktop.Forms
     /// Pencarian Berkas, Drag & Drop PDF/Gambar, 12 Alat PDF & Office, Manajer Folder DepupOffice,
     /// Pembuat & Pemindai QR Code, Tanda Tangan Digital, Ekstrak TTD Transparan, dan Donasi QR.
     /// </summary>
-    public partial class MainForm : Form
+    public partial class MainForm : Form, IGlassHost
     {
         private readonly string? _initialFilePath;
         private readonly IDocumentHistoryService _historyService;
         private CancellationTokenSource? _recentLoadCts;
-        private int _currentTab = 0; // 0 = Baca, 1 = Tools, 2 = Buat, 3 = Simpan
+        private int _currentTab = 0; // 0 = Beranda, 1 = Dokumen, 2 = Buat, 3 = Alat, 4 = Saya
         private int _filterMode = 0; // 0 = Semua Terkini, 1 = Ditandai
         private string _searchQuery = "";
 
@@ -38,7 +38,7 @@ namespace DepupOfficeDesktop.Forms
         private Label _barTitleLbl = null!;
         private Panel _contentHost = null!;
         private readonly Dictionary<int, NavItem> _navItems = new();
-        private readonly string[] _tabNames = { "Baca", "Tools", "Buat", "Simpan" };
+        private readonly string[] _tabNames = { "Beranda", "Dokumen", "Buat", "Alat", "Saya" };
 
         public MainForm(string? initialFilePath = null)
         {
@@ -116,6 +116,14 @@ namespace DepupOfficeDesktop.Forms
                     e.SuppressKeyPress = true;
                     _searchBox.Input.Focus();
                     _searchBox.Input.SelectAll();
+                    return;
+                }
+                // Zoom tampilan seperti VS Code: Ctrl + / Ctrl − / Ctrl 0 (Reader punya zoom sendiri)
+                if (e.Control && !e.Alt && _activeViewer == null)
+                {
+                    if (e.KeyCode is Keys.Oemplus or Keys.Add) { e.SuppressKeyPress = true; ChangeZoom(Theme.NextZoom(+1)); }
+                    else if (e.KeyCode is Keys.OemMinus or Keys.Subtract) { e.SuppressKeyPress = true; ChangeZoom(Theme.NextZoom(-1)); }
+                    else if (e.KeyCode is Keys.D0 or Keys.NumPad0) { e.SuppressKeyPress = true; ChangeZoom(1f); }
                 }
             };
 

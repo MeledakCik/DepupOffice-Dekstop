@@ -2,80 +2,182 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace DepupOfficeDesktop.Core
 {
     /// <summary>
-    /// Palet Depup Office Desktop v4.2 — "Glass Navy".
-    /// Permukaan navy gelap berlapis (gaya kaca transparan), satu aksen biru, gradasi biru → ungu untuk elemen utama.
-    /// Kertas dokumen (Word/PDF/Excel/cetak) tetap putih dengan tinta gelap: lihat konstanta PAPER_* / SHEET_*.
-    /// Rangka mengikuti kebiasaan aplikasi kantor profesional (WPS / MS Word / Adobe Acrobat): kanvas gelap di sekeliling
-    /// halaman putih, toolbar rapat, status bar di bawah.
+    /// Palet Depup Office Desktop v4.2 — sama persis dengan token Android (Ui.kt, object C):
+    /// minimalis netral-hangat. Halaman abu batu, kartu rata tanpa gradasi, satu aksen biru royal,
+    /// warna jenis berkas (PDF terakota, Word biru batu, Excel hijau sage, Gambar lavender) dipakai kecil-kecil.
+    /// Tema TERANG & GELAP: ikut Windows atau dipilih di Saya › Tampilan. Semua token dihitung ulang saat tema berganti.
+    /// Kertas dokumen (Word/PDF/Excel/cetak) selalu putih: konstanta PAPER_* / SHEET_*.
     /// </summary>
     public static class Theme
     {
         public const string AppVersion = "4.2.0";
         public const string AppName = "Depup Office Desktop";
 
-        /// <summary>Faktor skala DPI layar (1.0 = 96 DPI, 1.5 = 150%, dst).</summary>
+        /// <summary>Faktor skala total = DPI layar × zoom tampilan (1.0 = 96 DPI, zoom 100%).</summary>
         public static float Scale { get; private set; } = 1f;
+        private static float _dpiScale = 1f;
 
-        public static void SetDpi(int dpi) => Scale = Math.Max(0.75f, dpi / 96f);
+        public static void SetDpi(int dpi)
+        {
+            _dpiScale = Math.Max(0.75f, dpi / 96f);
+            Scale = _dpiScale * Zoom;
+        }
+
+        // ================= Zoom tampilan (Ctrl + / Ctrl − / Ctrl 0, seperti VS Code) =================
+        public static readonly float[] ZoomSteps = { 0.7f, 0.8f, 0.9f, 1f, 1.1f, 1.25f, 1.4f, 1.6f };
+        public const float DefaultZoom = 0.9f;
+
+        /// <summary>Zoom antarmuka (bukan isi dokumen). Memengaruhi ukuran komponen & huruf.</summary>
+        public static float Zoom { get; private set; } = DefaultZoom;
+
+        public static void SetZoom(float z)
+        {
+            Zoom = Math.Clamp(z, ZoomSteps[0], ZoomSteps[^1]);
+            Scale = _dpiScale * Zoom;
+            try { AppStorage.Config.UiZoom = Zoom; AppStorage.SaveConfig(); } catch { }
+        }
+
+        public static float NextZoom(int dir)
+        {
+            int i = Array.FindIndex(ZoomSteps, v => Math.Abs(v - Zoom) < 0.01f);
+            if (i < 0) i = Array.FindIndex(ZoomSteps, v => v > Zoom) - (dir > 0 ? 1 : 0);
+            return ZoomSteps[Math.Clamp(i + dir, 0, ZoomSteps.Length - 1)];
+        }
+
+        // ================= Efek kaca (Android: Saya › Tampilan › "Efek kaca (blur)") =================
+        /// <summary>true = latar aurora + panel kaca buram (blur) di jendela utama.</summary>
+        public static bool GlassOn => AppStorage.Config.GlassEffect;
+
+        public static void SetGlass(bool on)
+        {
+            AppStorage.Config.GlassEffect = on;
+            AppStorage.SaveConfig();
+            Changed?.Invoke();
+        }
+
+        /// <summary>Latar wadah halaman: transparan saat efek kaca aktif (latar aurora terlihat), selain itu BG.</summary>
+        public static Color PAGE => GlassOn ? Color.Transparent : BG;
 
         /// <summary>Ubah ukuran piksel desain (96 DPI) menjadi piksel nyata layar saat ini.</summary>
         public static int S(int px) => (int)Math.Round(px * Scale);
 
         private static Color H(string hex) => ColorTranslator.FromHtml(hex);
 
-        // ---------- Permukaan (gelap, berlapis) ----------
-        public static readonly Color BG = H("#0B1120");          // latar halaman / kanvas aplikasi
-        public static readonly Color SIDEBAR = H("#080D19");     // sidebar & status bar (lebih gelap)
-        public static readonly Color SURFACE = H("#111A2C");     // kartu kaca, dialog, toolbar
-        public static readonly Color SURFACE_HI = H("#16213A");  // bagian atas kartu kaca (gradasi kilau)
-        public static readonly Color SURFACE2 = H("#18233A");    // isian, chip, trek, tombol sekunder
-        public static readonly Color SURFACE3 = H("#22304D");    // ditekan / terpilih netral / hover
-        public static readonly Color SOFT = H("#152038");        // wadah ikon netral di dalam kartu
-        public static readonly Color FIELD = H("#0E1729");       // kotak isian teks
-        public static readonly Color LINE = H("#1F2B44");        // tepi kaca / pemisah tipis
-        public static readonly Color LINE_STRONG = H("#3A4B6B");
-        /// <summary>Kanvas di sekeliling halaman dokumen (seperti Acrobat / Word mode gelap).</summary>
-        public static readonly Color CANVAS = H("#0D1424");
+        // ================= Mode tema (Ikuti Windows / Terang / Gelap) =================
+        public const int MODE_SYSTEM = 0, MODE_LIGHT = 1, MODE_DARK = 2;
 
-        // ---------- Aksen ----------
-        public static readonly Color ACCENT = H("#3B7BF6");
-        public static readonly Color ACCENT_DARK = H("#2563EB");
-        public static readonly Color ACCENT_LIGHT = H("#7EA8FF");
-        public static readonly Color VIOLET = H("#7C4DFF");      // ujung gradasi merek (biru → ungu)
-        public static readonly Color BRAND = H("#2F6BF2");       // ubin logo
-        public static readonly Color BLUE_BG = H("#16284A");     // wadah lembut biru
-        public static readonly Color BLUE_LINE = H("#2A4A85");
-        public static readonly Color CYAN = H("#22D3EE");        // penanda aktif / status
+        /// <summary>true = tema gelap aktif.</summary>
+        public static bool Dark { get; private set; }
 
-        // ---------- Tinta & teks (di atas permukaan gelap) ----------
-        public static readonly Color INK = H("#E8EDF7");
-        public static readonly Color TEXT = H("#E8EDF7");
-        public static readonly Color MUTED = H("#8C99B3");
-        public static readonly Color FAINT = H("#5D6B86");
+        /// <summary>Dipicu setelah tema berganti (jendela utama membangun ulang tampilannya).</summary>
+        public static event Action? Changed;
 
-        // ---------- Kategori (ikon terang di wadah gelap bernuansa) ----------
-        public static readonly Color RED = H("#F2685C");         // PDF
-        public static readonly Color RED_BG = H("#3A1D25");
-        public static readonly Color TEAL = H("#2DBE8A");        // Excel
-        public static readonly Color TEAL_BG = H("#11312A");
-        public static readonly Color INDIGO = H("#A385FF");      // gambar / lain-lain
-        public static readonly Color INDIGO_BG = H("#2A2350");
-        public static readonly Color SKY = H("#5B9DFF");         // Word
-        public static readonly Color SKY_BG = H("#152B4D");
-        public static readonly Color AMBER = H("#F5B23D");
-        public static readonly Color AMBER_BG = H("#3A2C12");
-        public static readonly Color ERROR = H("#F2685C");
-        public static readonly Color ERROR_BG = H("#3A1D25");
-        public static readonly Color SUCCESS = H("#2DBE8A");
-        public static readonly Color SUCCESS_BG = H("#11312A");
+        public static int Mode => Math.Clamp(AppStorage.Config.ThemeMode, 0, 2);
 
-        // ---------- Kertas: isi dokumen, cetak, berkas hasil (TIDAK ikut tema gelap) ----------
+        /// <summary>Hitung ulang tema dari pengaturan (panggil saat aplikasi mulai).</summary>
+        public static void Init()
+        {
+            float z = AppStorage.Config.UiZoom;
+            Zoom = z >= 0.5f && z <= 2f ? z : DefaultZoom;
+            Scale = _dpiScale * Zoom;
+            Dark = ResolveDark(Mode);
+            try
+            {
+                Microsoft.Win32.SystemEvents.UserPreferenceChanged += (s, e) =>
+                {
+                    if (Mode != MODE_SYSTEM) return;
+                    bool d = ResolveDark(MODE_SYSTEM);
+                    if (d == Dark) return;
+                    Dark = d;
+                    Changed?.Invoke();
+                };
+            }
+            catch { }
+        }
+
+        public static void SetMode(int mode)
+        {
+            AppStorage.Config.ThemeMode = Math.Clamp(mode, 0, 2);
+            AppStorage.SaveConfig();
+            bool d = ResolveDark(Mode);
+            if (d == Dark) return;
+            Dark = d;
+            Changed?.Invoke();
+        }
+
+        private static bool ResolveDark(int mode)
+        {
+            if (mode == MODE_LIGHT) return false;
+            if (mode == MODE_DARK) return true;
+            try
+            {
+                using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                return k?.GetValue("AppsUseLightTheme") is int v && v == 0;
+            }
+            catch { return false; }
+        }
+
+        private static Color T(string light, string dark) => H(Dark ? dark : light);
+
+        // ---------- Permukaan (Android: BG, SURFACE, SURFACE2, SURFACE3, SOFT, LINE) ----------
+        public static Color BG => T("#F1F0EC", "#0F0F0E");           // latar halaman
+        public static Color SIDEBAR => BG;                            // navigasi menyatu dengan halaman (seperti bilah Android)
+        public static Color SURFACE => T("#FFFFFF", "#1B1B1A");      // kartu, sel, dialog, navigasi
+        public static Color SURFACE_HI => SURFACE;
+        public static Color SURFACE2 => T("#E8E6E1", "#272725");     // isian, chip, trek segmen
+        public static Color SURFACE3 => T("#DCD9D3", "#34342F");     // ditekan / terpilih netral
+        public static Color SOFT => T("#F3F2EE", "#242422");         // wadah ikon di dalam kartu
+        public static Color FIELD => T("#FFFFFF", "#1B1B1A");        // kotak isian
+        public static Color LINE => T("#E4E2DD", "#2C2C29");         // pemisah & garis tepi tipis
+        public static Color LINE_STRONG => T("#84817B", "#6F6D68");  // batas kontrol (>= 3:1)
+        /// <summary>Kanvas di sekeliling halaman dokumen (Android: TRACK/CANVAS = SURFACE3).</summary>
+        public static Color CANVAS => T("#DCD9D3", "#141413");
+
+        // ---------- Aksen biru royal (Android BLUE_ACCENT / PRIMARY) ----------
+        public static Color ACCENT => T("#1652F6", "#1D56FF");
+        public static Color ACCENT_DARK => T("#0F43D4", "#1D56FF");
+        public static Color ACCENT_LIGHT => T("#1652F6", "#7E9BFF");  // aksen sebagai teks di atas permukaan
+        public static Color BRAND => H("#0037FF");                     // ubin logo (sama dengan ikon aplikasi)
+        public static Color VIOLET => T("#72539E", "#C2A9E6");
+        public static Color BLUE_BG => T("#E8EEFF", "#19254D");       // PRIMARY_C: wadah lembut biru
+        public static Color BLUE_LINE => T("#C9D6FF", "#2B3A73");
+        public static Color CYAN => ACCENT;
+
+        // ---------- Tinta: aksi utama & panel kontras (Android INK / ON_INK) ----------
+        public static Color INK => T("#111111", "#F2F1EE");
+        public static Color ON_INK => T("#FFFFFF", "#111111");
+
+        // ---------- Teks ----------
+        public static Color TEXT => T("#111111", "#F2F1EE");
+        public static Color MUTED => T("#65625D", "#9C9A95");
+        public static Color FAINT => LINE_STRONG;
+
+        // ---------- Jenis berkas & status (Android PDF_FG/BG, DOC, XLS, IMG, SUCCESS, WARN, ERROR) ----------
+        public static Color RED => T("#B0472F", "#EE9A84");          // PDF
+        public static Color RED_BG => T("#F5E6E1", "#33221E");
+        public static Color SKY => T("#33609F", "#97B4E6");          // Word
+        public static Color SKY_BG => T("#E4EAF3", "#1E2631");
+        public static Color TEAL => T("#35754C", "#8CC9A0");         // Excel
+        public static Color TEAL_BG => T("#E3EEE6", "#1C2A21");
+        public static Color INDIGO => T("#72539E", "#C2A9E6");       // Gambar / lain-lain
+        public static Color INDIGO_BG => T("#ECE6F3", "#292230");
+        public static Color AMBER => T("#8A4508", "#F6C35A");        // peringatan / brankas
+        public static Color AMBER_BG => T("#FDF0CC", "#372A0C");
+        public static Color AMBER_FILL => T("#F5A524", "#F5B53D");
+        public static Color ERROR => T("#C0262D", "#FF8A8A");
+        public static Color ERROR_BG => T("#FCE4E4", "#3A1618");
+        public static Color SUCCESS => T("#15703A", "#5BD88A");
+        public static Color SUCCESS_BG => T("#DCF5E4", "#15301F");
+
+        // ---------- Kertas: isi dokumen, cetak, berkas hasil (TIDAK ikut tema) ----------
         public static readonly Color PAPER = Color.White;
         public static readonly Color PAPER_INK = H("#111111");
         public static readonly Color PAPER_MUTED = H("#65625D");
@@ -98,7 +200,7 @@ namespace DepupOfficeDesktop.Core
         public static double Luma(Color c) => (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255.0;
 
         /// <summary>Warna teks yang terbaca di atas <paramref name="bg"/> (putih atau navy gelap).</summary>
-        public static Color ReadableOn(Color bg) => Luma(bg) > 0.62 ? H("#0B1120") : Color.White;
+        public static Color ReadableOn(Color bg) => Luma(bg) > 0.62 ? H("#111111") : Color.White;
 
         /// <summary>Campur dua warna; t = 0 → a, t = 1 → b.</summary>
         public static Color Mix(Color a, Color b, double t)
@@ -111,39 +213,87 @@ namespace DepupOfficeDesktop.Core
         }
 
         /// <summary>Wadah lembut bernuansa warna di atas permukaan gelap (mis. tombol sekunder berwarna).</summary>
-        public static Color Tint(Color c) => Mix(SURFACE, c, 0.18);
+        public static Color Tint(Color c) =>
+            c.ToArgb() == ACCENT.ToArgb() ? BLUE_BG : Mix(SURFACE, c, Dark ? 0.2 : 0.12);
 
         /// <summary>Versi warna yang cukup terang untuk dipakai sebagai teks di atas permukaan gelap.</summary>
-        public static Color OnDark(Color c) => Luma(c) < 0.45 ? Mix(c, Color.White, 0.45) : c;
+        public static Color OnDark(Color c) => Dark && Luma(c) < 0.45 ? Mix(c, Color.White, 0.45) : c;
 
         // ================= Huruf =================
 
-        // Font: Android memakai Funnel Display; padanan bawaan Windows 11 = Segoe UI Variable (fallback Segoe UI).
+        // Huruf: sama dengan Android (Funnel Display, dibawa di folder Fonts). Bila gagal dimuat → Segoe UI Variable / Segoe UI.
+        private static System.Drawing.Text.PrivateFontCollection? _pfc;
+        private static FontFamily? _famRegular, _famMedium, _famSemi;
+        private static bool _fontsTried;
+
+        private static void LoadFonts()
+        {
+            if (_fontsTried) return;
+            _fontsTried = true;
+            try
+            {
+                string dir = Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts");
+                var map = new[] { ("funnel_display_regular.ttf", "Funnel Display"), ("funnel_display_medium.ttf", "Funnel Display Medium"), ("funnel_display_semibold.ttf", "Funnel Display SemiBold") };
+                var pfc = new System.Drawing.Text.PrivateFontCollection();
+                foreach (var (file, _) in map)
+                {
+                    string path = Path.Combine(dir, file);
+                    if (!File.Exists(path)) return;
+                    AddFontResourceEx(path, FR_PRIVATE, IntPtr.Zero);   // agar GDI (TextRenderer / Label) mengenalnya
+                    pfc.AddFontFile(path);                              // agar GDI+ (Font) mengenalnya
+                }
+                FontFamily? Find(string name) => pfc.Families.FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
+                _famRegular = Find(map[0].Item2);
+                _famMedium = Find(map[1].Item2) ?? _famRegular;
+                _famSemi = Find(map[2].Item2) ?? _famMedium;
+                _pfc = pfc;
+            }
+            catch
+            {
+                _famRegular = _famMedium = _famSemi = null;
+            }
+        }
+
         private static readonly bool HasVariable = FontExists("Segoe UI Variable Display");
         private static bool FontExists(string name)
         {
             try { using var f = new Font(name, 10f); return string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase); }
             catch { return false; }
         }
-        private static string HeadFamily => HasVariable ? "Segoe UI Variable Display Semib" : "Segoe UI Semibold";
-        private static string LabelFamily => HasVariable ? "Segoe UI Variable Text Semibold" : "Segoe UI Semibold";
-        private static string BodyFamily => HasVariable ? "Segoe UI Variable Text" : "Segoe UI";
 
+        private static Font Make(FontFamily? fam, string fallback, float sizePt, FontStyle style)
+        {
+            LoadFonts();
+            sizePt = Math.Max(6f, sizePt * Zoom);   // huruf ikut zoom tampilan
+            if (fam != null)
+            {
+                try { return new Font(fam, sizePt, style, GraphicsUnit.Point); } catch { }
+            }
+            return new Font(fallback, sizePt, style, GraphicsUnit.Point);
+        }
+
+        private static string HeadFallback => HasVariable ? "Segoe UI Variable Display Semib" : "Segoe UI Semibold";
+        private static string LabelFallback => HasVariable ? "Segoe UI Variable Text Semibold" : "Segoe UI Semibold";
+        private static string BodyFallback => HasVariable ? "Segoe UI Variable Text" : "Segoe UI";
+
+        /// <summary>Judul (Funnel Display SemiBold).</summary>
         public static Font FontHead(float sizePt = 16f, FontStyle style = FontStyle.Bold)
-            => new Font(HeadFamily, sizePt, style & ~FontStyle.Bold, GraphicsUnit.Point);
+            => Make(_famSemi, HeadFallback, sizePt, style & ~FontStyle.Bold);
 
         /// <summary>Judul tampilan besar (sapaan beranda, judul halaman).</summary>
         public static Font FontDisplay(float sizePt = 28f)
-            => new Font(HeadFamily, sizePt, FontStyle.Regular, GraphicsUnit.Point);
+            => Make(_famSemi, HeadFallback, sizePt, FontStyle.Regular);
 
+        /// <summary>Label tombol, nama berkas (Funnel Display Medium).</summary>
         public static Font FontLabel(float sizePt = 10.5f, FontStyle style = FontStyle.Regular)
-            => new Font(LabelFamily, sizePt, style, GraphicsUnit.Point);
+            => Make(_famMedium, LabelFallback, sizePt, style);
 
+        /// <summary>Isi & keterangan (Funnel Display Regular).</summary>
         public static Font FontBody(float sizePt = 10f, FontStyle style = FontStyle.Regular)
-            => new Font(BodyFamily, sizePt, style, GraphicsUnit.Point);
+            => Make(_famRegular, BodyFallback, sizePt, style);
 
         public static Font FontMono(float sizePt = 10f)
-            => new Font(FontExists("Cascadia Mono") ? "Cascadia Mono" : "Consolas", sizePt, FontStyle.Regular, GraphicsUnit.Point);
+            => new Font(FontExists("Cascadia Mono") ? "Cascadia Mono" : "Consolas", Math.Max(6f, sizePt * Zoom), FontStyle.Regular, GraphicsUnit.Point);
 
         // ================= Bentuk =================
 
@@ -182,15 +332,15 @@ namespace DepupOfficeDesktop.Core
             }
             else if (neutral)
             {
-                back = SURFACE2;
+                back = SURFACE2;          // Android: tombol tonal netral
                 fore = TEXT;
-                border = LINE;
+                border = SURFACE2;
             }
             else
             {
-                back = Tint(col);
+                back = Tint(col);         // Android: tombol tonal berwarna (wadah lembut + teks warna)
                 fore = OnDark(col);
-                border = Mix(SURFACE, col, 0.35);
+                border = back;
             }
 
             var btn = new DepupOfficeDesktop.Controls.PillButton
@@ -205,10 +355,10 @@ namespace DepupOfficeDesktop.Core
                 AutoSize = width == 0,
                 Padding = new Padding(12, 4, 12, 4),
                 UseVisualStyleBackColor = false,
-                CornerRadius = 10
+                CornerRadius = 999        // pil penuh seperti tombol Android
             };
             if (width > 0) btn.Width = width;
-            btn.FlatAppearance.BorderSize = filled ? 0 : 1;
+            btn.FlatAppearance.BorderSize = 0;
             btn.FlatAppearance.BorderColor = border;
             return btn;
         }
@@ -234,8 +384,8 @@ namespace DepupOfficeDesktop.Core
                     Text = "  " + message + "  ",
                     AutoSize = true,
                     MaximumSize = new Size(Math.Max(S(240), f.ClientSize.Width - S(80)), 0),
-                    BackColor = SURFACE3,
-                    ForeColor = TEXT,
+                    BackColor = INK,
+                    ForeColor = ON_INK,
                     Font = FontLabel(10f),
                     UseMnemonic = false,
                     Padding = new Padding(S(14), S(9), S(14), S(9))
@@ -320,7 +470,7 @@ namespace DepupOfficeDesktop.Core
             FitToScreen(form);
             if (IsDefaultBack(form.BackColor) || form.BackColor.ToArgb() == Color.White.ToArgb())
                 form.BackColor = SURFACE;
-            if (form.ForeColor == SystemColors.ControlText || Luma(form.ForeColor) < 0.35 && Luma(form.BackColor) < 0.3)
+            if (form.ForeColor == SystemColors.ControlText || Math.Abs(Luma(form.ForeColor) - Luma(form.BackColor)) < 0.35)
                 form.ForeColor = TEXT;
             StyleTree(form);
         }
@@ -350,11 +500,25 @@ namespace DepupOfficeDesktop.Core
             {
                 try
                 {
-                    int on = 1;
+                    int on = Dark ? 1 : 0;
                     if (DwmSetWindowAttribute(form.Handle, 20, ref on, sizeof(int)) != 0)
                         DwmSetWindowAttribute(form.Handle, 19, ref on, sizeof(int));
-                    int caption = ColorTranslator.ToWin32(form is DepupOfficeDesktop.Forms.MainForm ? SIDEBAR : SURFACE);
-                    DwmSetWindowAttribute(form.Handle, 35, ref caption, sizeof(int));   // DWMWA_CAPTION_COLOR
+                    if (form is DepupOfficeDesktop.Forms.MainForm && GlassOn)
+                    {
+                        // Windows 11: bilah judul memakai bahan Mica (kaca buram sistem); warna keterangan dikembalikan ke bawaan
+                        int def = unchecked((int)0xFFFFFFFF);
+                        DwmSetWindowAttribute(form.Handle, 35, ref def, sizeof(int));
+                        int mica = 2;                                                     // DWMSBT_MAINWINDOW
+                        DwmSetWindowAttribute(form.Handle, 38, ref mica, sizeof(int));    // DWMWA_SYSTEMBACKDROP_TYPE
+                    }
+                    else
+                    {
+                        // seperti bilah status Android: bilah judul menyatu dengan latar halaman
+                        int caption = ColorTranslator.ToWin32(form is DepupOfficeDesktop.Forms.MainForm || form.BackColor.ToArgb() == BG.ToArgb() ? BG : SURFACE);
+                        DwmSetWindowAttribute(form.Handle, 35, ref caption, sizeof(int));   // DWMWA_CAPTION_COLOR
+                        int none = 1;                                                     // DWMSBT_NONE
+                        if (form is DepupOfficeDesktop.Forms.MainForm) DwmSetWindowAttribute(form.Handle, 38, ref none, sizeof(int));
+                    }
                     int border = ColorTranslator.ToWin32(LINE);
                     DwmSetWindowAttribute(form.Handle, 34, ref border, sizeof(int));    // DWMWA_BORDER_COLOR
                     int text = ColorTranslator.ToWin32(TEXT);
@@ -458,8 +622,8 @@ namespace DepupOfficeDesktop.Core
                         b.FlatAppearance.MouseDownBackColor = LINE_STRONG;
                         b.Cursor = Cursors.Hand;
                     }
-                    else if (Luma(b.ForeColor) < 0.35 && Luma(b.BackColor) < 0.3)
-                        b.ForeColor = TEXT;
+                    else if (Math.Abs(Luma(b.ForeColor) - Luma(b.BackColor)) < 0.3)
+                        b.ForeColor = ReadableOn(b.BackColor);
                     return;
 
                 case Label:
@@ -483,8 +647,12 @@ namespace DepupOfficeDesktop.Core
 
         private static void FixTextContrast(Control c)
         {
+            // Hanya warna teks netral (abu/hitam/putih) yang disesuaikan; warna kategori/status dibiarkan.
+            Color fc = c.ForeColor;
+            bool neutral = Math.Max(fc.R, Math.Max(fc.G, fc.B)) - Math.Min(fc.R, Math.Min(fc.G, fc.B)) < 40;
+            if (!neutral) return;
             Color bg = EffectiveBack(c);
-            if (Luma(bg) < 0.3 && Luma(c.ForeColor) < 0.4)
+            if (Luma(bg) < 0.3 && Luma(fc) < 0.4 || Luma(bg) > 0.6 && Luma(fc) > 0.75)
                 c.ForeColor = TEXT;
         }
 
@@ -514,12 +682,12 @@ namespace DepupOfficeDesktop.Core
         /// <summary>Scrollbar gelap gaya Windows Explorer mode gelap (diabaikan bila tidak didukung OS).</summary>
         public static void DarkScrollbars(Control c)
         {
-            void Apply() { try { SetWindowTheme(c.Handle, "DarkMode_Explorer", null); } catch { } }
+            void Apply() { try { SetWindowTheme(c.Handle, Dark ? "DarkMode_Explorer" : "Explorer", null); } catch { } }
             if (c.IsHandleCreated) Apply();
             else c.HandleCreated += (s, e) => Apply();
         }
 
-        /// <summary>Menu konteks / toolstrip gelap dengan sorotan aksen.</summary>
+        /// <summary>Menu konteks / toolstrip mengikuti tema (terang / gelap).</summary>
         private sealed class DarkToolStripRenderer : ToolStripProfessionalRenderer
         {
             public DarkToolStripRenderer() : base(new DarkColors()) { RoundedEdges = false; }
@@ -606,6 +774,11 @@ namespace DepupOfficeDesktop.Core
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        private const uint FR_PRIVATE = 0x10;
+
+        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+        private static extern int AddFontResourceEx(string lpszFilename, uint fl, IntPtr pdv);
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hWnd, string? pszSubAppName, string? pszSubIdList);
