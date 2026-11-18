@@ -17,7 +17,7 @@ namespace DepupOfficeDesktop.Forms
     /// Pencarian Berkas, Drag & Drop PDF/Gambar, 12 Alat PDF & Office, Manajer Folder DepupOffice,
     /// Pembuat & Pemindai QR Code, Tanda Tangan Digital, Ekstrak TTD Transparan, dan Donasi QR.
     /// </summary>
-    public partial class MainForm : Form, IGlassHost
+    public partial class MainForm : Form, IGlassHost, IBackdropHost
     {
         private readonly string? _initialFilePath;
         private readonly IDocumentHistoryService _historyService;

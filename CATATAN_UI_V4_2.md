@@ -25,6 +25,13 @@ Sumber desain: app Android `C:\Project-App\DepupOffice` — `Ui.kt` (object `C`,
 - **Zoom antarmuka seperti VS Code**: `Ctrl +` perbesar, `Ctrl −` perkecil, `Ctrl 0` kembali 100%. Juga di **Saya › Tampilan › Ukuran tampilan**
   dan di status bar (klik = 100%). Bawaan 90% agar komponen tidak terlalu besar. Tersimpan otomatis.
 
+### Perbaikan gulir, zoom & performa
+- Latar kaca area konten kini **ikut bergulir** bersama isi (`GlassScrollPanel`): geseran piksel Windows saat menggulir selalu
+  cocok, tidak ada lagi sisa gambar / tampilan dobel. Halaman tidak lagi melompat sendiri saat fokus berpindah.
+- Latar aurora disimpan beresolusi rendah (1/4 dan 1/24) lalu diperbesar halus — jauh lebih ringan memori & CPU.
+- Ganti zoom / tema / ukuran jendela membangun ulang tampilan tanpa kedip (penggambaran ditahan sampai selesai).
+- Layar lebar: konten diletakkan di tengah dengan lebar baca maksimum; grid & kolom menyesuaikan lebar.
+
 ## Khusus desktop
 - Navigasi samping (padanan navigasi bawah), grid 3–4 kolom, dua kolom berdampingan di layar lebar, status bar bawah.
 - Seret berkas ke jendela; Ctrl+K untuk cari; Esc menutup Reader.
