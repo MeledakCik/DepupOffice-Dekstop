@@ -400,7 +400,11 @@ namespace DepupOfficeDesktop.Forms
             if (k.Contains("campuran")) return CardIcon.Merge;
             if (k.Contains("pdf ke word")) return CardIcon.Word;
             if (k.Contains("slideshow") || k.Contains("presentasi") || k.Contains("pptx")) return CardIcon.ImagePdf;
+            if (k.Contains("exe ke pdf")) return CardIcon.Pdf;
+            if (k.Contains("pustaka ttd")) return CardIcon.Signature;
             if (k.Contains("nota")) return CardIcon.Receipt;
+            if (k.Contains("undangan") || k.Contains("izin") || k.Contains("keterangan") || k.Contains("proposal")) return CardIcon.Letter;
+            if (k.Contains("notulen")) return CardIcon.Edit;
             if (k.Contains("katalog")) return CardIcon.ImagePdf;
             if (k.Contains("jadwal")) return CardIcon.Calendar;
             if (k.Contains("barcode") || k.Contains("label harga")) return CardIcon.Qr;
@@ -620,7 +624,8 @@ namespace DepupOfficeDesktop.Forms
             p.Controls.Add(CreateGrid(w, 220,
                 tw => CreateFeatureTile(tw, "Baca Lantang", "Text-to-Speech offline, ID & EN", "TTS", Theme.SKY, Theme.SKY_BG, PickAndOpenSupportedFile),
                 tw => CreateFeatureTile(tw, "Cetak Langsung", "Cetak PDF atau gambar ke printer", "Print", Theme.ACCENT, Theme.BLUE_BG, QuickPrintFlow),
-                tw => CreateFeatureTile(tw, "QR & Barcode", "Pindai, buat, dan stempel ke PDF", "QR", Theme.INDIGO, Theme.INDIGO_BG, ShowQrManagerDialog)));
+                tw => CreateFeatureTile(tw, "QR & Barcode", "Pindai, buat, dan stempel ke PDF", "QR", Theme.INDIGO, Theme.INDIGO_BG, ShowQrManagerDialog),
+                tw => CreateFeatureTile(tw, "Pustaka TTD & Stempel", "Simpan tanda tangan & stempel untuk dipakai ulang", "Baru", Theme.ACCENT, Theme.BLUE_BG, () => Ui.PickStamp(this, manageOnly: true))));
 
             p.Controls.Add(CreateSectionHeader("Produktivitas", "", w));
             p.Controls.Add(CreateGrid(w, 230,
@@ -950,7 +955,7 @@ namespace DepupOfficeDesktop.Forms
                 tw => CreateFeatureTile(tw, "Gambar ke PDF", "Gabungkan banyak foto JPG/PNG menjadi 1 PDF", "Multi-Foto", Theme.ACCENT, Theme.BLUE_BG, ImagesToSinglePdfFlow),
                 tw => CreateFeatureTile(tw, "TTD Transparan", "Hapus latar putih dari foto tanda tangan", "PNG Alpha", Theme.ACCENT, Theme.BLUE_BG, ExtractTransparentSignatureFlow)));
 
-            p.Controls.Add(CreateSectionHeader("Alat PDF Lanjutan", "8 alat • teks PDF tetap asli", w));
+            p.Controls.Add(CreateSectionHeader("Alat PDF Lanjutan", "9 alat • teks PDF tetap asli", w));
             p.Controls.Add(CreateGrid(w, 230,
                 tw => CreateFeatureTile(tw, "Dokumen Terlindungi", "Sampul DepUp + AES-256-GCM, anti-kopi & anti-cetak, password guru", "Baru", Theme.RED, Theme.RED_BG, ProtectedDocFlow),
                 tw => CreateFeatureTile(tw, "Password PDF AES-256", "Kunci PDF tanpa mengubah halaman jadi gambar", "AES-256", Theme.INDIGO, Theme.INDIGO_BG, PasswordPdfFlow),
@@ -958,8 +963,9 @@ namespace DepupOfficeDesktop.Forms
                 tw => CreateFeatureTile(tw, "Nomor Halaman PDF", "\"Hal X dari Y\", header opsional, lewati sampul", "Baru", Theme.ACCENT, Theme.BLUE_BG, PageNumberFlow),
                 tw => CreateFeatureTile(tw, "Watermark PDF", "RAHASIA / DRAFT diagonal, pola ubin, atau stempel pojok", "Baru", Theme.ACCENT, Theme.BLUE_BG, WatermarkPdfFlow),
                 tw => CreateFeatureTile(tw, "Gabung Campuran", "Campur PDF & foto jadi satu PDF, urutan bebas", "PDF + Foto", Theme.TEAL, Theme.TEAL_BG, UniversalMergeFlow),
-                tw => CreateFeatureTile(tw, "PDF ke Word", "Ubah PDF/scan ke .docx (OCR offline)", "DOCX", Theme.ACCENT, Theme.BLUE_BG, PdfToWordFlow),
-                tw => CreateFeatureTile(tw, "Slideshow Presentasi", "Peragaan layar penuh PPTX/PDF, laser & timer", "PPTX", Theme.AMBER, Theme.AMBER_BG, SlideshowFlow)));
+                tw => CreateFeatureTile(tw, "PDF ke Word", "Ubah PDF ke .docx, tata letak tetap", "DOCX", Theme.ACCENT, Theme.BLUE_BG, PdfToWordFlow),
+                tw => CreateFeatureTile(tw, "Slideshow Presentasi", "Peragaan layar penuh PPTX/PDF, laser & timer", "PPTX", Theme.AMBER, Theme.AMBER_BG, SlideshowFlow),
+                tw => CreateFeatureTile(tw, "EXE ke PDF", "Ambil PDF dari program \"PDF to EXE\" (tanpa menjalankannya)", "Pulihkan", Theme.RED, Theme.RED_BG, ExeToPdfFlow)));
 
             p.Controls.Add(CreateSectionHeader("Pengaturan Format Dokumen", "4 modul", w));
             p.Controls.Add(CreateGrid(w, 230,
@@ -1043,6 +1049,11 @@ namespace DepupOfficeDesktop.Forms
                 tw => CreateFeatureTile(tw, "CV / Resume", "Template Curriculum Vitae terstruktur", "Karir", Theme.INDIGO, Theme.INDIGO_BG, () => OpenWord(DocEditorForm.TEMPLATE_CV)),
                 tw => CreateFeatureTile(tw, "Kuitansi / Invoice", "Format pembayaran & nota penjualan", "Keuangan", Theme.TEAL, Theme.TEAL_BG, () => OpenSheet(SheetEditorForm.TEMPLATE_INVOICE)),
                 tw => CreateFeatureTile(tw, "Daftar Hadir", "Template rekap kehadiran karyawan", "HR / Admin", Theme.TEAL, Theme.TEAL_BG, () => OpenSheet(SheetEditorForm.TEMPLATE_PRESENSI))));
+
+            // Template organisasi & administrasi warga (DocTemplates.kt Android)
+            p.Controls.Add(CreateSectionHeader("Surat Organisasi & Warga", "Karang Taruna • RT/RW • Panitia", w));
+            p.Controls.Add(CreateGrid(w, 230, DocEditorForm.OrgTemplates.Select(t =>
+                (Func<int, Control>)(tw => CreateFeatureTile(tw, t.Title, t.Sub, "Word", Theme.SKY, Theme.SKY_BG, () => OpenWord(t.Key)))).ToArray()));
 
             p.Controls.Add(CreateSectionHeader("Generator Bisnis & UMKM", "10 alat", w));
             p.Controls.Add(CreateGrid(w, 230,

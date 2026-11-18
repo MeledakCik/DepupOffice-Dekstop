@@ -282,7 +282,7 @@ namespace DepupOfficeDesktop.Forms
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
                 Padding = new Padding(S(24)),
-                BackColor = ColorTranslator.FromHtml("#E9EDF7")
+                BackColor = Theme.BG
             };
 
             // Urutan penambahan: yang paling akhir ditambahkan menempel paling atas.
@@ -320,10 +320,111 @@ namespace DepupOfficeDesktop.Forms
 
         private void SetZoom(float z)
         {
-            _zoom = Math.Clamp(z, 0.5f, 2.5f);
-            _zoomLabel.Text = $"{(int)(_zoom * 100)}%";
-            _modeLabel.Text = $"● Tema: {GetThemeName()} • Zoom {(int)(_zoom * 100)}%";
+            _zoom = Math.Clamp(z, 0.25f, 4f);
+            UpdateZoomLabels();
+            if (WebStageActive) { _office!.Zoom = _zoom; return; }   // Word/Excel: zoom halus tanpa membangun ulang
+            _zoom = Math.Clamp(_zoom, 0.5f, 2.5f);
+            UpdateZoomLabels();
             RenderStage();
+        }
+
+        private void UpdateZoomLabels()
+        {
+            _zoomLabel.Text = $"{(int)Math.Round(_zoom * 100)}%";
+            _modeLabel.Text = $"● Tema: {GetThemeName()} • Zoom {(int)Math.Round(_zoom * 100)}%";
+        }
+
+        // ---------- Word/Excel lewat WebView2 (tata letak halaman, tabel, gambar seperti Android) ----------
+        private OfficeWebView? _office;
+        private Control? _officeHost;
+        private bool WebStageActive => _office != null && !_office.IsDisposed && _officeHost != null && _stagePanel.Controls.Contains(_officeHost);
+        private bool UseWebOffice => (_mime == AppStorage.MIME_DOCX || _mime == AppStorage.MIME_XLSX) && OfficeWebView.RuntimeAvailable();
+
+        private void ReloadOfficeStage()
+        {
+            if (IsDisposed || _officeHost == null) return;
+            _stagePanel.Controls.Remove(_officeHost);
+            _officeHost.Dispose();
+            _officeHost = null; _office = null;
+            RenderStage();
+        }
+
+        /// <summary>Panggung WebView: bilah aksi + penampil. Dokumen dirender di thread latar agar UI tetap responsif.</summary>
+        private Control BuildOfficeStage(bool isWord)
+        {
+            var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.BG };
+            var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = S(56), Padding = new Padding(S(8), S(8), S(8), 0), BackColor = Theme.BG, WrapContents = false };
+            var office = new OfficeWebView { Dock = DockStyle.Fill, AllowCopy = !_opt.Secure || _opt.AllowCopy };
+            _office = office;
+
+            var btnEdit = Theme.CreateButton(isWord ? "✏️ Edit di Editor Word" : "✏️ Buka di Editor Excel", true, isWord ? Theme.ACCENT : Theme.TEAL, S(40));
+            btnEdit.Margin = new Padding(S(4), 0, S(4), 0);
+            btnEdit.Click += (s, e) =>
+            {
+                var before = File.Exists(_filePath) ? File.GetLastWriteTimeUtc(_filePath) : default;
+                if (isWord) { using var ed = new DocEditorForm(_filePath); ed.ShowDialog(DlgOwner); }
+                else { using var ed = new SheetEditorForm(_filePath); ed.ShowDialog(DlgOwner); }
+                // berkas disimpan di editor → tampilkan versi terbaru
+                if (File.Exists(_filePath) && File.GetLastWriteTimeUtc(_filePath) != before) BeginInvoke(new Action(ReloadOfficeStage));
+            };
+            var btnPdf = Theme.CreateButton("📄 Simpan sebagai PDF", false, Theme.RED, S(40));
+            btnPdf.Margin = new Padding(S(4), 0, S(4), 0);
+            btnPdf.Click += async (s, e) =>
+            {
+                string outPdf = AppStorage.NamedOut(AppStorage.BaseName(_fileName), "pdf");
+                btnPdf.Enabled = false;
+                try
+                {
+                    if (await office.SaveAsPdfAsync(outPdf))
+                    {
+                        AppStorage.AddRecent(outPdf);
+                        Theme.Toast(DlgOwner, $"PDF dibuat (tata letak asli): {Path.GetFileName(outPdf)}");
+                    }
+                    else Theme.Toast(DlgOwner, "Gagal membuat PDF.");
+                }
+                finally { btnPdf.Enabled = true; }
+            };
+            var hint = new Label
+            {
+                Text = "Ctrl + roda mouse untuk zoom • Ctrl+F cari teks",
+                AutoSize = true, Font = Theme.FontBody(9f), ForeColor = Theme.MUTED, Margin = new Padding(S(12), S(12), 0, 0)
+            };
+            if (!_opt.Secure) bar.Controls.AddRange(new Control[] { btnEdit, btnPdf });
+            bar.Controls.Add(hint);
+
+            office.ZoomChanged += z => { if (IsDisposed) return; _zoom = (float)z; UpdateZoomLabels(); };
+            office.DocumentReady += async n =>
+            {
+                if (IsDisposed) return;
+                office.ApplyPaperTheme(_paperTheme);
+                if (n > 0) _counterPill.Text = $"{n} halaman";
+                if (isWord)
+                {
+                    // halaman lebih lebar dari layar (mis. lanskap): perkecil agar pas lebar; selain itu pakai zoom bawaan
+                    double fit = await office.FitWidthAsync();
+                    _zoom = (float)Math.Min(fit, _zoom);
+                    office.Zoom = _zoom;
+                }
+                else office.Zoom = _zoom;
+                UpdateZoomLabels();
+            };
+            host.Controls.Add(office);
+            host.Controls.Add(bar);
+            _officeHost = host;
+
+            string path = _filePath, title = _fileName;
+            _ = Task.Run(() => isWord ? Core.Office.DocxHtml.Render(path, title) : Core.Office.XlsxHtml.Render(path, title))
+                .ContinueWith(t =>
+                {
+                    if (office.IsDisposed) { if (t.Status == TaskStatus.RanToCompletion) t.Result.Dispose(); return; }
+                    office.BeginInvoke(new Action(async () =>
+                    {
+                        if (office.IsDisposed) { if (t.Status == TaskStatus.RanToCompletion) t.Result.Dispose(); return; }
+                        if (t.Status == TaskStatus.RanToCompletion) await office.LoadAsync(t.Result);
+                        else office.ShowMessage("Dokumen tidak dapat dibaca.\n" + (t.Exception?.GetBaseException().Message ?? ""));
+                    }));
+                });
+            return host;
         }
 
         private void GoToPage(int pageIdx)
@@ -415,11 +516,24 @@ namespace DepupOfficeDesktop.Forms
 
         private void RenderStage()
         {
+            if (WebStageActive)
+            {
+                // Word/Excel di WebView: ganti tema tanpa memuat ulang dokumen
+                _office!.ApplyPaperTheme(_paperTheme);
+                UpdateZoomLabels();
+                return;
+            }
             _stagePanel.SuspendLayout();
             ClearStage();
             _modeLabel.Text = $"● Tema: {GetThemeName()} • Zoom {(int)(_zoom * 100)}%";
 
-            if (_isPptx && _pdfPages.Count == 0)
+            if (UseWebOffice)
+            {
+                _stagePanel.Padding = Padding.Empty;
+                _stagePanel.AutoScroll = false;
+                _stagePanel.Controls.Add(BuildOfficeStage(_mime == AppStorage.MIME_DOCX));
+            }
+            else if (_isPptx && _pdfPages.Count == 0)
             {
                 _stagePanel.Controls.Add(new Label
                 {
@@ -648,6 +762,13 @@ namespace DepupOfficeDesktop.Forms
                     return;
                 }
             }
+            else if (WebStageActive)
+            {
+                var office = _office!;
+                _ = office.AllTextAsync().ContinueWith(t => BeginInvoke(new Action(() =>
+                    VoiceReaderManager.ShowVoiceReaderDialog(DlgOwner, _fileName, t.Result))), TaskScheduler.Default);
+                return;
+            }
             else if (_mime == AppStorage.MIME_DOCX)
             {
                 text = OfficeReader.ReadDocxText(_filePath);
@@ -679,6 +800,8 @@ namespace DepupOfficeDesktop.Forms
             }
             else if (_isPdf)
                 PrintHelper.PrintPdf(DlgOwner, _filePath, _fileName);
+            else if (WebStageActive)
+                _office!.Print();   // cetak sesuai tata letak halaman asli (tabel, gambar, header/footer)
             else if (_mime == AppStorage.MIME_DOCX)
                 PrintHelper.PrintText(DlgOwner, _fileName, OfficeReader.ReadDocxText(_filePath));
             else if (_mime.StartsWith("image/"))
@@ -752,7 +875,22 @@ namespace DepupOfficeDesktop.Forms
                 MessageBox.Show(DlgOwner, $"Tanda tangan berhasil ditempel!\nDisimpan di:\n{outPdf}", "Tanda Tangan PDF", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 
-            dlg.Controls.AddRange(new Control[] { lbl, pad, lblPos, cmbPos, btnClear, btnApply });
+            // Pustaka TTD & stempel tersimpan (atau buat & simpan yang baru)
+            var btnLib = Theme.CreateButton("📚 Pustaka TTD…", false, Theme.ACCENT, 36, 140);
+            btnLib.Location = new Point(300, 220);
+            btnLib.Click += (s, e) =>
+            {
+                using var sig = Ui.PickStamp(dlg, "Pilih Tanda Tangan / Stempel");
+                if (sig == null) return;
+                string outPdf = AppStorage.NamedOut("TTD_" + AppStorage.BaseName(_fileName), "pdf");
+                PdfEngine.Sign(_filePath, sig, _curPage + 1, cmbPos.SelectedIndex, outPdf);
+                AppStorage.AddRecent(outPdf);
+                AppStorage.SetLastJob("Tanda Tangan PDF", outPdf);
+                dlg.Close();
+                MessageBox.Show(DlgOwner, $"Tanda tangan berhasil ditempel!\nDisimpan di:\n{outPdf}", "Tanda Tangan PDF", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            };
+
+            dlg.Controls.AddRange(new Control[] { lbl, pad, lblPos, cmbPos, btnLib, btnClear, btnApply });
             dlg.ShowDialog(DlgOwner);
         }
 

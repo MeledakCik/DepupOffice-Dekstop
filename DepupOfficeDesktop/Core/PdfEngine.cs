@@ -1128,6 +1128,7 @@ namespace DepupOfficeDesktop.Core
 
         /// <summary>Pesan kesalahan OCR terakhir (null bila OCR terakhir berhasil).</summary>
         public static string? LastOcrError { get; private set; }
+        public static void ClearOcrError() => LastOcrError = null;
 
         /// <summary>OCR offline sungguhan (mesin OCR bawaan Windows) → baris, paragraf, dan kotak teks.</summary>
         public static OcrPage RunOcr(Bitmap bmp)

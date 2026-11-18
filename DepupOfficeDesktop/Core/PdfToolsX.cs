@@ -275,21 +275,72 @@ namespace DepupOfficeDesktop.Core
         // ------------------------------------------------------------------ PDF ke Word
 
         /// <summary>
-        /// PDF → Word lewat OCR offline Windows per halaman (jalur toWordOcr Android). Halaman yang tidak terbaca yakin
-        /// disertakan sebagai gambar agar isinya tidak hilang. Bila PDF dibuka dengan password, Word hasilnya dikunci
-        /// "hanya-baca" dengan password yang sama (DocxProtect). Mengembalikan true bila hasil dikunci.
+        /// PDF → Word bertata letak asli (port PdfToDocx Android): teks, font, tabel, foto &amp; bentuk dibaca langsung dari isi PDF.
+        /// Halaman hasil pindai (tanpa teks) di-OCR offline Windows; bila tak terbaca yakin, halaman disertakan sebagai gambar.
+        /// Bila PDF dibuka dengan password, Word hasilnya dikunci "hanya-baca" dengan password yang sama (DocxProtect).
+        /// Mengembalikan true bila hasil dikunci. Bila struktur PDF tak terbaca sama sekali, jatuh ke jalur OCR penuh.
         /// </summary>
         public static bool PdfToWord(string src, string outPath, Action<int, int>? progress = null)
         {
             string? pw = PdfRenderer.GetCachedPassword(src);
+            PdfFile? f = null;
             try
             {
-                var f = OpenPdf(src);
+                f = OpenPdf(src);
                 if (f.Encrypted && string.IsNullOrEmpty(pw) && !f.CanExtract)
                     throw new PdfPasswordException("PDF ini dibatasi pemiliknya (tidak boleh disalin/diubah). Masukkan password pemilik untuk mengubahnya ke Word.");
             }
-            catch (PdfException) { /* struktur rusak: tetap coba lewat perender Windows */ }
-            // Halaman dirender & di-OCR satu per satu: memori tetap kecil walau PDF ratusan halaman.
+            catch (PdfException) { f = null; /* struktur rusak: pakai perender Windows + OCR */ }
+            bool converted = false;
+            if (f != null)
+            {
+                try
+                {
+                    new PdfToDocx(outPath).Convert(f, new WinScan(src), progress);
+                    converted = true;
+                }
+                catch (OutOfMemoryException) { throw; }
+                catch (Exception) { try { File.Delete(outPath); } catch { } }
+            }
+            if (!converted) PdfToWordOcr(src, outPath, progress);
+            if (!string.IsNullOrEmpty(pw)) { DocxProtect.Apply(outPath, pw!); return true; }
+            return false;
+        }
+
+        /// <summary>OCR / gambar halaman pindaian untuk <see cref="PdfToDocx"/> (render satu halaman saja, hemat memori).</summary>
+        private sealed class WinScan : PdfToDocx.IScan
+        {
+            private readonly string _src;
+            private int _lastIdx = -1; private Bitmap? _last;
+            public WinScan(string src) { _src = src; }
+            private Bitmap? Page(int i)
+            {
+                if (_lastIdx == i && _last != null) return _last;
+                _last?.Dispose(); _last = null; _lastIdx = i;
+                var l = PdfEngine.RenderPages(_src, 2200, i, 1);
+                _last = l.Count > 0 ? l[0] : null;
+                for (int k = 1; k < l.Count; k++) l[k].Dispose();
+                return _last;
+            }
+            public List<string>? Ocr(int i)
+            {
+                var b = Page(i); if (b == null) return null;
+                var paras = PdfEngine.RunOcr(b).Paras.Where(p => !string.IsNullOrWhiteSpace(p)).Select(AiText.Clean).ToList();
+                return paras.Sum(p => p.Length) < 40 ? null : paras;
+            }
+            public (byte[] Jpeg, int W, int H)? PageImage(int i)
+            {
+                var b = Page(i); if (b == null) return null;
+                using var small = Scale(b, 1400);
+                var r = (PdfEngine.EncodeJpeg(small, 82), small.Width, small.Height);
+                _last?.Dispose(); _last = null; _lastIdx = -1;
+                return r;
+            }
+        }
+
+        /// <summary>Jalur cadangan: OCR offline per halaman (untuk PDF yang strukturnya tak terbaca).</summary>
+        private static void PdfToWordOcr(string src, string outPath, Action<int, int>? progress)
+        {
             int done;
             using (var d = new DocxWriter(outPath))
             {
@@ -299,8 +350,7 @@ namespace DepupOfficeDesktop.Core
                     d.BeginPage();
                     var ocr = PdfEngine.RunOcr(page);
                     var paras = ocr.Paras.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
-                    int chars = paras.Sum(p => p.Length);
-                    if (chars < 40)
+                    if (paras.Sum(p => p.Length) < 40)
                     {
                         using var small = Scale(page, 1400);
                         d.Image(PdfEngine.EncodeJpeg(small, 82), small.Width, small.Height);
@@ -314,8 +364,6 @@ namespace DepupOfficeDesktop.Core
                 try { File.Delete(outPath); } catch { }
                 throw new InvalidOperationException("Halaman PDF tidak bisa dibaca.");
             }
-            if (!string.IsNullOrEmpty(pw)) { DocxProtect.Apply(outPath, pw!); return true; }
-            return false;
         }
 
         private static Bitmap Scale(Bitmap b, int maxDim)

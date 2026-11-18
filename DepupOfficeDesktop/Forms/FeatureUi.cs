@@ -37,8 +37,8 @@ namespace DepupOfficeDesktop.Forms
             _innerW = w - S(48) - SystemInformation.VerticalScrollBarWidth;
 
             var head = new Panel { Dock = DockStyle.Top, Height = S(70), BackColor = Theme.SURFACE, Padding = new Padding(S(20), S(10), S(20), S(6)) };
-            head.Controls.Add(new Label { Text = subtitle, Font = Theme.FontBody(9.5f), ForeColor = Theme.MUTED, Dock = DockStyle.Top, Height = S(22), AutoEllipsis = true });
-            head.Controls.Add(new Label { Text = title, Font = Theme.FontHead(13f), ForeColor = Theme.TEXT, Dock = DockStyle.Top, Height = S(30), AutoEllipsis = true });
+            head.Controls.Add(new Label { UseMnemonic = false, Text = subtitle, Font = Theme.FontBody(9.5f), ForeColor = Theme.MUTED, Dock = DockStyle.Top, Height = S(22), AutoEllipsis = true });
+            head.Controls.Add(new Label { UseMnemonic = false, Text = title, Font = Theme.FontHead(13f), ForeColor = Theme.TEXT, Dock = DockStyle.Top, Height = S(30), AutoEllipsis = true });
 
             Body = new FlowLayoutPanel
             {
@@ -80,7 +80,7 @@ namespace DepupOfficeDesktop.Forms
         {
             var l = new Label
             {
-                Text = text, AutoSize = true, MaximumSize = new Size(_innerW, 0),
+                UseMnemonic = false, Text = text, AutoSize = true, MaximumSize = new Size(_innerW, 0),
                 Font = bold ? Theme.FontLabel(10f, FontStyle.Bold) : Theme.FontBody(9.5f), ForeColor = color ?? (bold ? Theme.TEXT : Theme.MUTED)
             };
             return Add(l, top);
@@ -193,9 +193,9 @@ namespace DepupOfficeDesktop.Forms
                 FormBorderStyle = FormBorderStyle.FixedDialog, ControlBox = false, StartPosition = FormStartPosition.CenterParent,
                 ClientSize = new Size(S(420), S(118)), BackColor = Color.White, ShowInTaskbar = false, Text = "Depup Office", AutoScaleMode = AutoScaleMode.None
             };
-            var lbl = new Label { Text = message, Font = Theme.FontLabel(10f), ForeColor = Theme.TEXT, Location = new Point(S(20), S(18)), Size = new Size(S(380), S(24)), AutoEllipsis = true };
+            var lbl = new Label { UseMnemonic = false, Text = message, Font = Theme.FontLabel(10f), ForeColor = Theme.TEXT, Location = new Point(S(20), S(18)), Size = new Size(S(380), S(24)), AutoEllipsis = true };
             var bar = new ProgressBar { Location = new Point(S(20), S(52)), Size = new Size(S(380), S(16)), Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30 };
-            var sub = new Label { Text = "Diproses 100% offline di komputer ini…", Font = Theme.FontBody(8.5f), ForeColor = Theme.MUTED, Location = new Point(S(20), S(78)), Size = new Size(S(380), S(20)) };
+            var sub = new Label { UseMnemonic = false, Text = "Diproses 100% offline di komputer ini…", Font = Theme.FontBody(8.5f), ForeColor = Theme.MUTED, Location = new Point(S(20), S(78)), Size = new Size(S(380), S(20)) };
             f.Controls.AddRange(new Control[] { lbl, bar, sub });
             T? result = default; Exception? err = null;
             void Progress(int i, int n)
@@ -260,34 +260,81 @@ namespace DepupOfficeDesktop.Forms
             return Path.Combine(AppStorage.PicturesDir, $"{safe}_{stamp}.{ext}");
         }
 
-        /// <summary>Pilih gambar stempel/TTD (PNG transparan disarankan) atau gambar tanda tangan langsung.</summary>
-        public static Bitmap? PickStamp(IWin32Window owner)
+        /// <summary>
+        /// Pustaka Tanda Tangan &amp; Stempel (port SignatureManager.kt): pilih TTD/stempel tersimpan (klik), atau buat baru dari
+        /// coretan / foto stempel di kertas putih — opsional disimpan ke pustaka untuk dipakai lagi.
+        /// <paramref name="manageOnly"/> = hanya mengelola pustaka (tanpa mengembalikan gambar).
+        /// </summary>
+        public static Bitmap? PickStamp(IWin32Window owner, string title = "Pustaka Tanda Tangan & Stempel", bool manageOnly = false)
         {
-            using var d = new Dlg("Stempel / Tanda Tangan", "Pilih gambar stempel/logo toko, atau gambar tanda tangan langsung di bawah ini.", 560);
-            var pad = new SignaturePadControl { Height = S(200) };
-            d.Add(pad);
+            using var d = new Dlg(title, manageOnly ? "TTD & stempel tersimpan di PC ini (folder privat aplikasi). Klik kanan untuk menghapus."
+                : "Klik TTD/stempel tersimpan untuk memakainya, atau gambar yang baru di kotak bawah.", 600, 760);
             Bitmap? result = null;
-            d.Action("Pakai Coretan", true, () =>
+            var lib = new FlowLayoutPanel { Width = S(552), Height = S(150), AutoScroll = true, BackColor = Theme.SOFT, Padding = new Padding(S(6)), WrapContents = true };
+            var empty = new Label { UseMnemonic = false, Text = "Pustaka masih kosong. Simpan TTD atau stempel pertama Anda di bawah.", AutoSize = true, ForeColor = Theme.MUTED, Font = Theme.FontBody(9.5f), Margin = new Padding(S(8)) };
+            void Refresh()
+            {
+                foreach (Control c in lib.Controls.Cast<Control>().ToList()) { lib.Controls.Remove(c); if (c is PictureBox pb) pb.Image?.Dispose(); if (c != empty) c.Dispose(); }
+                var items = SignatureLibrary.List();
+                if (items.Count == 0) { lib.Controls.Add(empty); return; }
+                foreach (var path in items)
+                {
+                    var img = SignatureLibrary.Load(path);
+                    if (img == null) continue;
+                    var pb = new PictureBox { Image = img, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(S(124), S(78)), BackColor = Color.White, Margin = new Padding(S(4)), Cursor = Cursors.Hand };
+                    new ToolTip().SetToolTip(pb, Path.GetFileNameWithoutExtension(path) + (manageOnly ? "" : " — klik untuk memakai"));
+                    var p = path;
+                    if (!manageOnly) pb.Click += (s, e) => { result = SignatureLibrary.Load(p); d.Close(); };
+                    var m = new ContextMenuStrip();
+                    m.Items.Add("Hapus dari pustaka", null, (s, e) =>
+                    {
+                        if (MessageBox.Show(d, $"Hapus \"{Path.GetFileNameWithoutExtension(p)}\" dari pustaka?", "Pustaka TTD", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                        SignatureLibrary.Delete(p); Refresh();
+                    });
+                    pb.ContextMenuStrip = m;
+                    lib.Controls.Add(pb);
+                }
+            }
+            d.Label("Tersimpan", bold: true);
+            d.Add(lib);
+            d.Label("Buat baru — gambar di kotak putih", bold: true, top: S(10));
+            var pad = new SignaturePadControl { Height = S(170) };
+            d.Add(pad);
+            var save = d.Check("Simpan ke pustaka untuk dipakai lagi", true);
+            var name = d.Field("Nama (opsional)", "");
+            Refresh();
+
+            Bitmap? Keep(Bitmap bmp)
+            {
+                if (save.Checked || manageOnly) { SignatureLibrary.Save(name.Text, bmp); Refresh(); }
+                return bmp;
+            }
+            d.Action(manageOnly ? "Simpan Coretan" : "Pakai Coretan", true, () =>
             {
                 var bmp = pad.IsEmpty ? null : pad.ToBitmap();
                 if (bmp == null) { Theme.Toast(d, "Coretan masih kosong"); return; }
+                Keep(bmp);
+                if (manageOnly) { bmp.Dispose(); pad.Clear(); name.Text = ""; Theme.Toast(d, "Tersimpan di pustaka"); return; }
                 result = bmp; d.Close();
             });
-            d.Action("Pilih Berkas Gambar…", false, () =>
+            d.Action("Dari Foto Stempel / TTD…", false, () =>
             {
-                var p = PickFile(d, "Pilih Stempel / Logo", FilterImages);
+                var p = PickFile(d, "Pilih foto stempel / TTD di atas kertas putih", FilterImages);
                 if (p == null) return;
                 try
                 {
                     using var raw = PdfEngine.Decode(p, 1200);
-                    // foto TTD/stempel di kertas putih → latar dibuat transparan
-                    result = System.Drawing.Image.IsAlphaPixelFormat(raw.PixelFormat) ? new Bitmap(raw) : PdfEngine.ExtractTransparentSignature(raw);
-                    d.Close();
+                    var bmp = SignatureLibrary.MakeTransparent(raw);   // latar putih → transparan
+                    if (string.IsNullOrWhiteSpace(name.Text)) name.Text = Path.GetFileNameWithoutExtension(p);
+                    Keep(bmp);
+                    if (manageOnly) { bmp.Dispose(); name.Text = ""; Theme.Toast(d, "Tersimpan di pustaka"); return; }
+                    result = bmp; d.Close();
                 }
                 catch (Exception ex) { ShowError(d, ex); }
             });
             d.Action("Bersihkan", false, () => pad.Clear(), Theme.TEXT);
             d.ShowDialog(owner);
+            foreach (Control c in lib.Controls) if (c is PictureBox pb) pb.Image?.Dispose();
             return result;
         }
     }

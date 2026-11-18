@@ -995,7 +995,21 @@ namespace DepupOfficeDesktop.Forms
                 RenderCurrentTab();
             };
 
-            dlg.Controls.AddRange(new Control[] { pad, btnClear, numPage, cmbPos, btnApply });
+            var btnLib = Theme.CreateButton("📚 Pustaka TTD…", false, Theme.ACCENT, 30, 150);
+            btnLib.Location = new Point(290, 220);
+            btnLib.Click += (s, e) =>
+            {
+                using var sig = Ui.PickStamp(dlg, "Pilih Tanda Tangan / Stempel");
+                if (sig == null) return;
+                string outPdf = AppStorage.NewOut("ttd_" + AppStorage.BaseName(Path.GetFileName(pdfPath)), "pdf");
+                PdfEngine.Sign(pdfPath, sig, (int)numPage.Value, cmbPos.SelectedIndex, outPdf);
+                AppStorage.AddRecent(outPdf);
+                AppStorage.SetLastJob("Tanda Tangan PDF", outPdf);
+                dlg.Close();
+                ShowOperationResultDialog("Tanda Tangan Berhasil Ditempel", outPdf);
+                RenderCurrentTab();
+            };
+            dlg.Controls.AddRange(new Control[] { pad, btnClear, btnLib, numPage, cmbPos, btnApply });
             dlg.ShowDialog(this);
         }
 

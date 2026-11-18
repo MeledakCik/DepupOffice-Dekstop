@@ -277,11 +277,31 @@ namespace DepupOfficeDesktop.Forms
             var src = PickPdf("Pilih PDF untuk Diubah ke Word");
             if (src == null) return;
             string outDocx = AppStorage.NewOut(AppStorage.BaseName(Path.GetFileName(src)), "docx");
-            var (ok, locked) = Ui.Busy(this, "Mengubah PDF ke Word (OCR offline)…", p => PdfToolsX.PdfToWord(src, outDocx, p));
+            PdfEngine.ClearOcrError();
+            var (ok, locked) = Ui.Busy(this, "Mengubah PDF ke Word (teks, tabel & tata letak asli)…", p => PdfToolsX.PdfToWord(src, outDocx, p));
             if (!ok) return;
             if (PdfEngine.LastOcrError != null) Theme.Toast(this, PdfEngine.LastOcrError);
             Done("PDF ke Word", outDocx, "PDF Berhasil Diubah ke Word",
-                locked ? "PDF terkunci → Word dibuat HANYA-BACA. Untuk mengedit, gunakan password yang sama (Word: Tinjau → Batasi Pengeditan)." : "Teks dibaca dengan OCR offline Windows; halaman tanpa teks disertakan sebagai gambar.");
+                locked ? "PDF terkunci → Word dibuat HANYA-BACA. Untuk mengedit, gunakan password yang sama (Word: Tinjau → Batasi Pengeditan)." : "Teks, font, tabel, foto & bentuk diambil langsung dari PDF dengan tata letak aslinya. Halaman hasil pindai dibaca dengan OCR offline Windows.");
+        }
+
+        /// <summary>EXE → PDF: ambil PDF dari program "PDF to EXE". Berkas .exe hanya dibaca, TIDAK dijalankan.</summary>
+        private void ExeToPdfFlow()
+        {
+            var src = Ui.PickFile(this, "Pilih berkas .exe hasil \"PDF to EXE\" (tidak akan dijalankan)", "Program PDF (*.exe)|*.exe");
+            if (src == null) return;
+            if (new FileInfo(src).Length > 400L << 20) { Theme.Toast(this, "Berkas terlalu besar (maks. 400 MB)"); return; }
+            string outPdf = AppStorage.NewOut(AppStorage.BaseName(Path.GetFileName(src)), "pdf");
+            var (ok, res) = Ui.Busy(this, "Mencari PDF di dalam berkas…", _ =>
+            {
+                var r = ExeToPdf.Extract(File.ReadAllBytes(src));
+                File.WriteAllBytes(outPdf, r.Pdf);
+                return r;
+            });
+            if (!ok || res == null) return;
+            int pages = Math.Max(0, PdfEngine.PageCount(outPdf));
+            Done("EXE ke PDF", outPdf, "PDF Berhasil Diambil",
+                $"Metode: {res.Method}{(res.KeyHex != null ? $" (kunci {res.KeyHex})" : "")} • {pages} halaman. Berkas .exe tidak dijalankan sama sekali.");
         }
 
         private void SlideshowFlow()

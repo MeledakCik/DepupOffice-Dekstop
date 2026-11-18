@@ -530,6 +530,21 @@ namespace DepupOfficeDesktop.Core
         }
 
         /// <summary>Tambahkan proteksi hanya-baca ber-password ke .docx yang sudah ada.</summary>
+        /// <summary>Lepas "Batasi Pengeditan" (dokumen kembali bisa diedit bebas).</summary>
+        public static void Remove(string docxPath)
+        {
+            using var z = ZipFile.Open(docxPath, ZipArchiveMode.Update);
+            var e = z.GetEntry("word/settings.xml");
+            if (e == null) return;
+            string xml;
+            using (var r = new StreamReader(e.Open(), Encoding.UTF8)) xml = r.ReadToEnd();
+            var cleaned = Regex.Replace(xml, @"<w:documentProtection\b[^>]*/>", "");
+            if (cleaned == xml) return;
+            e.Delete();
+            using var w = new StreamWriter(z.CreateEntry("word/settings.xml").Open(), new UTF8Encoding(false));
+            w.Write(cleaned);
+        }
+
         public static void Apply(string docxPath, string pw)
         {
             using var z = ZipFile.Open(docxPath, ZipArchiveMode.Update);
