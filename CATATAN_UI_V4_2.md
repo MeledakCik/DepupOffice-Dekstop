@@ -18,6 +18,13 @@ Sumber desain: app Android `C:\Project-App\DepupOffice` — `Ui.kt` (object `C`,
   - Alat: *Pilih berkas dulu*, lalu *Kelola PDF · Konversi · Gambar & foto · Tanda tangan & keamanan · Baca & bagikan*.
   - Saya: Keamanan (Brankas, Privasi), Penyimpanan, Tampilan (tema), Format bawaan, Dukungan.
 
+## Efek kaca & zoom
+- **Efek kaca (blur)** — padanan "Efek kaca (blur)" Android (`Controls/Glass.cs`): latar aurora lembut di belakang jendela utama,
+  sidebar / bilah atas / status bar dan semua kartu menjadi kaca buram semi-transparan dengan tepi sorot. Windows 11: bilah judul memakai Mica.
+  Bisa dimatikan di **Saya › Tampilan › Efek kaca** (*Kaca blur / Rata*).
+- **Zoom antarmuka seperti VS Code**: `Ctrl +` perbesar, `Ctrl −` perkecil, `Ctrl 0` kembali 100%. Juga di **Saya › Tampilan › Ukuran tampilan**
+  dan di status bar (klik = 100%). Bawaan 90% agar komponen tidak terlalu besar. Tersimpan otomatis.
+
 ## Khusus desktop
 - Navigasi samping (padanan navigasi bawah), grid 3–4 kolom, dua kolom berdampingan di layar lebar, status bar bawah.
 - Seret berkas ke jendela; Ctrl+K untuk cari; Esc menutup Reader.

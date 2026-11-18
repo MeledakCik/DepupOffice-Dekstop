@@ -21,10 +21,50 @@ namespace DepupOfficeDesktop.Core
         public const string AppVersion = "4.2.0";
         public const string AppName = "Depup Office Desktop";
 
-        /// <summary>Faktor skala DPI layar (1.0 = 96 DPI, 1.5 = 150%, dst).</summary>
+        /// <summary>Faktor skala total = DPI layar × zoom tampilan (1.0 = 96 DPI, zoom 100%).</summary>
         public static float Scale { get; private set; } = 1f;
+        private static float _dpiScale = 1f;
 
-        public static void SetDpi(int dpi) => Scale = Math.Max(0.75f, dpi / 96f);
+        public static void SetDpi(int dpi)
+        {
+            _dpiScale = Math.Max(0.75f, dpi / 96f);
+            Scale = _dpiScale * Zoom;
+        }
+
+        // ================= Zoom tampilan (Ctrl + / Ctrl − / Ctrl 0, seperti VS Code) =================
+        public static readonly float[] ZoomSteps = { 0.7f, 0.8f, 0.9f, 1f, 1.1f, 1.25f, 1.4f, 1.6f };
+        public const float DefaultZoom = 0.9f;
+
+        /// <summary>Zoom antarmuka (bukan isi dokumen). Memengaruhi ukuran komponen & huruf.</summary>
+        public static float Zoom { get; private set; } = DefaultZoom;
+
+        public static void SetZoom(float z)
+        {
+            Zoom = Math.Clamp(z, ZoomSteps[0], ZoomSteps[^1]);
+            Scale = _dpiScale * Zoom;
+            try { AppStorage.Config.UiZoom = Zoom; AppStorage.SaveConfig(); } catch { }
+        }
+
+        public static float NextZoom(int dir)
+        {
+            int i = Array.FindIndex(ZoomSteps, v => Math.Abs(v - Zoom) < 0.01f);
+            if (i < 0) i = Array.FindIndex(ZoomSteps, v => v > Zoom) - (dir > 0 ? 1 : 0);
+            return ZoomSteps[Math.Clamp(i + dir, 0, ZoomSteps.Length - 1)];
+        }
+
+        // ================= Efek kaca (Android: Saya › Tampilan › "Efek kaca (blur)") =================
+        /// <summary>true = latar aurora + panel kaca buram (blur) di jendela utama.</summary>
+        public static bool GlassOn => AppStorage.Config.GlassEffect;
+
+        public static void SetGlass(bool on)
+        {
+            AppStorage.Config.GlassEffect = on;
+            AppStorage.SaveConfig();
+            Changed?.Invoke();
+        }
+
+        /// <summary>Latar wadah halaman: transparan saat efek kaca aktif (latar aurora terlihat), selain itu BG.</summary>
+        public static Color PAGE => GlassOn ? Color.Transparent : BG;
 
         /// <summary>Ubah ukuran piksel desain (96 DPI) menjadi piksel nyata layar saat ini.</summary>
         public static int S(int px) => (int)Math.Round(px * Scale);
@@ -45,6 +85,9 @@ namespace DepupOfficeDesktop.Core
         /// <summary>Hitung ulang tema dari pengaturan (panggil saat aplikasi mulai).</summary>
         public static void Init()
         {
+            float z = AppStorage.Config.UiZoom;
+            Zoom = z >= 0.5f && z <= 2f ? z : DefaultZoom;
+            Scale = _dpiScale * Zoom;
             Dark = ResolveDark(Mode);
             try
             {
@@ -221,6 +264,7 @@ namespace DepupOfficeDesktop.Core
         private static Font Make(FontFamily? fam, string fallback, float sizePt, FontStyle style)
         {
             LoadFonts();
+            sizePt = Math.Max(6f, sizePt * Zoom);   // huruf ikut zoom tampilan
             if (fam != null)
             {
                 try { return new Font(fam, sizePt, style, GraphicsUnit.Point); } catch { }
@@ -249,7 +293,7 @@ namespace DepupOfficeDesktop.Core
             => Make(_famRegular, BodyFallback, sizePt, style);
 
         public static Font FontMono(float sizePt = 10f)
-            => new Font(FontExists("Cascadia Mono") ? "Cascadia Mono" : "Consolas", sizePt, FontStyle.Regular, GraphicsUnit.Point);
+            => new Font(FontExists("Cascadia Mono") ? "Cascadia Mono" : "Consolas", Math.Max(6f, sizePt * Zoom), FontStyle.Regular, GraphicsUnit.Point);
 
         // ================= Bentuk =================
 
@@ -459,9 +503,22 @@ namespace DepupOfficeDesktop.Core
                     int on = Dark ? 1 : 0;
                     if (DwmSetWindowAttribute(form.Handle, 20, ref on, sizeof(int)) != 0)
                         DwmSetWindowAttribute(form.Handle, 19, ref on, sizeof(int));
-                    // seperti bilah status Android: bilah judul menyatu dengan latar halaman
-                    int caption = ColorTranslator.ToWin32(form is DepupOfficeDesktop.Forms.MainForm || form.BackColor.ToArgb() == BG.ToArgb() ? BG : SURFACE);
-                    DwmSetWindowAttribute(form.Handle, 35, ref caption, sizeof(int));   // DWMWA_CAPTION_COLOR
+                    if (form is DepupOfficeDesktop.Forms.MainForm && GlassOn)
+                    {
+                        // Windows 11: bilah judul memakai bahan Mica (kaca buram sistem); warna keterangan dikembalikan ke bawaan
+                        int def = unchecked((int)0xFFFFFFFF);
+                        DwmSetWindowAttribute(form.Handle, 35, ref def, sizeof(int));
+                        int mica = 2;                                                     // DWMSBT_MAINWINDOW
+                        DwmSetWindowAttribute(form.Handle, 38, ref mica, sizeof(int));    // DWMWA_SYSTEMBACKDROP_TYPE
+                    }
+                    else
+                    {
+                        // seperti bilah status Android: bilah judul menyatu dengan latar halaman
+                        int caption = ColorTranslator.ToWin32(form is DepupOfficeDesktop.Forms.MainForm || form.BackColor.ToArgb() == BG.ToArgb() ? BG : SURFACE);
+                        DwmSetWindowAttribute(form.Handle, 35, ref caption, sizeof(int));   // DWMWA_CAPTION_COLOR
+                        int none = 1;                                                     // DWMSBT_NONE
+                        if (form is DepupOfficeDesktop.Forms.MainForm) DwmSetWindowAttribute(form.Handle, 38, ref none, sizeof(int));
+                    }
                     int border = ColorTranslator.ToWin32(LINE);
                     DwmSetWindowAttribute(form.Handle, 34, ref border, sizeof(int));    // DWMWA_BORDER_COLOR
                     int text = ColorTranslator.ToWin32(TEXT);

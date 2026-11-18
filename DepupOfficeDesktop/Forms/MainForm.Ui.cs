@@ -67,6 +67,7 @@ namespace DepupOfficeDesktop.Forms
         private void BuildShell()
         {
             BackColor = Theme.BG;
+            DoubleBuffered = true;
             if (!_themeHooked)
             {
                 _themeHooked = true;
@@ -76,19 +77,23 @@ namespace DepupOfficeDesktop.Forms
                     if (IsDisposed) return;
                     BeginInvoke(new Action(() =>
                     {
+                        GlassBackdrop.Reset();
                         Theme.ApplyWindowChrome(this);
                         RebuildShellForDpi();
+                        Invalidate(true);
                     }));
                 };
+                // Latar aurora mengikuti ukuran jendela: gambar ulang semua kaca saat ukuran berubah.
+                Resize += (s, e) => { if (Theme.GlassOn) Invalidate(true); };
             }
 
             int sideW = S(236);
 
             // ---------- Navigasi samping (padanan navigasi bawah Android) ----------
-            var sidebar = new Panel { Dock = DockStyle.Left, Width = sideW, BackColor = Theme.BG };
+            var sidebar = new GlassPane { Dock = DockStyle.Left, Width = sideW, BackColor = Theme.PAGE, Surface = Theme.SURFACE, EdgeLines = AnchorStyles.Right };
             int innerW = sideW - S(32);
 
-            var brand = new Panel { Dock = DockStyle.Top, Height = S(150), BackColor = Theme.BG };
+            var brand = new Panel { Dock = DockStyle.Top, Height = S(150), BackColor = Theme.PAGE };
             var logo = new LogoTile { Size = new Size(S(40), S(40)), Location = new Point(S(18), S(20)), Cursor = Cursors.Hand };
             logo.Click += (s, e) => SelectTab(TAB_HOME);
             brand.Controls.Add(logo);
@@ -101,7 +106,7 @@ namespace DepupOfficeDesktop.Forms
             btnEditPdf.Click += (s, e) => StartPdfEditorFlow();
             brand.Controls.Add(btnEditPdf);
 
-            var nav = new Panel { Dock = DockStyle.Fill, BackColor = Theme.BG, Padding = new Padding(S(16), S(2), S(16), 0) };
+            var nav = new Panel { Dock = DockStyle.Fill, BackColor = Theme.PAGE, Padding = new Padding(S(16), S(2), S(16), 0) };
             string[] navNames = { "Beranda", "Dokumen", "Buat", "Alat", "Saya" };
             NavItemIcon[] navIcons = { NavItemIcon.Home, NavItemIcon.Docs, NavItemIcon.Create, NavItemIcon.Tools, NavItemIcon.User };
             for (int i = navNames.Length - 1; i >= 0; i--)   // Dock=Top: yang ditambahkan terakhir berada paling atas
@@ -114,7 +119,7 @@ namespace DepupOfficeDesktop.Forms
             }
 
             // Bawah: kartu kecil penyimpanan (data nyata dari disk)
-            var bottom = new Panel { Dock = DockStyle.Bottom, Height = S(104), BackColor = Theme.BG, Padding = new Padding(S(16), S(4), S(16), S(16)) };
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = S(104), BackColor = Theme.PAGE, Padding = new Padding(S(16), S(4), S(16), S(16)) };
             var (dFree, dTotal) = AppStorage.GetDeviceStorage();
             var storeCard = new CardPanel { Dock = DockStyle.Fill, BackColor = Theme.SURFACE, CornerRadius = 18, Cursor = Cursors.Hand };
             storeCard.Controls.Add(L("Penyimpanan PC", Theme.FontLabel(9f), Theme.TEXT, S(14), S(12)));
@@ -134,17 +139,11 @@ namespace DepupOfficeDesktop.Forms
             sidebar.Controls.Add(nav);
             sidebar.Controls.Add(bottom);
             sidebar.Controls.Add(brand);
-            sidebar.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 1, BackColor = Theme.LINE });
 
             // ---------- Area kanan: bilah atas + konten ----------
-            var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.BG };
+            var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.PAGE };
             _rightHost = right;
-            var topBar = new Panel { Dock = DockStyle.Top, Height = S(72), BackColor = Theme.BG };
-            topBar.Paint += (s, e) =>
-            {
-                using var pen = new Pen(Theme.LINE);
-                e.Graphics.DrawLine(pen, 0, topBar.Height - 1, topBar.Width, topBar.Height - 1);
-            };
+            var topBar = new GlassPane { Dock = DockStyle.Top, Height = S(72), BackColor = Theme.PAGE, Surface = Theme.BG, EdgeLines = AnchorStyles.Bottom };
 
             _barTitleLbl = L(_tabNames[Math.Clamp(_currentTab, 0, _tabNames.Length - 1)], Theme.FontHead(17f), Theme.TEXT, 0, 0);
             _barTitleLbl.Visible = false;
@@ -197,10 +196,16 @@ namespace DepupOfficeDesktop.Forms
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
                 Padding = new Padding(S(32), S(6), S(32), S(32)),
-                BackColor = Theme.BG,
+                BackColor = Theme.PAGE,
                 AllowDrop = true
             };
             Theme.DarkScrollbars(_contentHost);
+            if (Theme.GlassOn)
+            {
+                // kaca menampilkan latar yang diam di belakang jendela: setelah menggulir, gambar ulang (bukan geser piksel lama)
+                _contentHost.Scroll += (s, e) => _contentHost.Invalidate(true);
+                _contentHost.MouseWheel += (s, e) => _contentHost.Invalidate(true);
+            }
             _contentHost.DragEnter += _dragEnterHandler;
             _contentHost.DragDrop += _dragDropHandler;
             _contentHost.SizeChanged += (s, e) =>
@@ -214,12 +219,7 @@ namespace DepupOfficeDesktop.Forms
             right.Controls.Add(topBar);
 
             // ---------- Status bar khas desktop (seperti MS Word / WPS) ----------
-            var status = new Panel { Dock = DockStyle.Bottom, Height = S(28), BackColor = Theme.SURFACE };
-            status.Paint += (s, e) =>
-            {
-                using var pen = new Pen(Theme.LINE);
-                e.Graphics.DrawLine(pen, 0, 0, status.Width, 0);
-            };
+            var status = new GlassPane { Dock = DockStyle.Bottom, Height = S(28), BackColor = Theme.GlassOn ? Theme.PAGE : Theme.SURFACE, Surface = Theme.SURFACE, EdgeLines = AnchorStyles.Top };
             Label StatusText(string text, Color color, DockStyle dock)
             {
                 using var f = Theme.FontBody(8.5f);
@@ -232,14 +232,19 @@ namespace DepupOfficeDesktop.Forms
                     TextAlign = ContentAlignment.MiddleLeft,
                     Font = Theme.FontBody(8.5f),
                     ForeColor = color,
-                    BackColor = Theme.SURFACE,
+                    BackColor = Theme.GlassOn ? Color.Transparent : Theme.SURFACE,
                     UseMnemonic = false,
                     AutoEllipsis = true,
+                    Cursor = Cursors.Default,
                     Padding = new Padding(S(14), 0, S(8), 0)
                 };
             }
             status.Controls.Add(StatusText("Hasil disimpan di " + AppStorage.OutDir, Theme.MUTED, DockStyle.Fill));
             status.Controls.Add(StatusText($"Depup Office {Theme.AppVersion}  ·  Tema {(Theme.Mode == Theme.MODE_SYSTEM ? "ikut Windows" : Theme.Dark ? "gelap" : "terang")}", Theme.MUTED, DockStyle.Right));
+            var zoomLbl = StatusText($"Zoom {Math.Round(Theme.Zoom * 100)}%   Ctrl + / Ctrl −", Theme.MUTED, DockStyle.Right);
+            zoomLbl.Cursor = Cursors.Hand;
+            zoomLbl.Click += (s, e) => ChangeZoom(1f);   // klik = kembali ke 100%
+            status.Controls.Add(zoomLbl);
             status.Controls.Add(StatusText("●  100% offline — berkas tidak pernah diunggah", Theme.SUCCESS, DockStyle.Left));
 
             Controls.Add(right);
@@ -254,6 +259,23 @@ namespace DepupOfficeDesktop.Forms
         }
 
         private bool _initialFocusHooked;
+
+        /// <summary>Ganti zoom antarmuka (Ctrl + / Ctrl − / Ctrl 0) lalu bangun ulang tampilan.</summary>
+        private void ChangeZoom(float z)
+        {
+            if (Math.Abs(z - Theme.Zoom) < 0.001f) { Theme.Toast(this, $"Zoom {Math.Round(Theme.Zoom * 100)}%"); return; }
+            Theme.SetZoom(z);
+            Theme.SetDpi(DeviceDpi);
+            RebuildShellForDpi();
+            Theme.Toast(this, $"Zoom tampilan {Math.Round(Theme.Zoom * 100)}%  •  Ctrl + / Ctrl − / Ctrl 0");
+        }
+
+        /// <summary>Latar jendela: aurora lembut (efek kaca aktif) atau warna halaman biasa.</summary>
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            if (Theme.GlassOn) GlassBackdrop.Paint(this, e.Graphics, Rectangle.Intersect(e.ClipRectangle, ClientRectangle), false);
+            else base.OnPaintBackground(e);
+        }
 
         /// <summary>Bangun ulang rangka & halaman (DPI monitor berubah atau tema berganti).</summary>
         private void RebuildShellForDpi()
@@ -313,7 +335,7 @@ namespace DepupOfficeDesktop.Forms
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Padding = new Padding(0, 0, 0, S(8)),
-                BackColor = Theme.BG,
+                BackColor = Theme.PAGE,
                 AllowDrop = true
             };
             page.DragEnter += _dragEnterHandler;
@@ -639,7 +661,7 @@ namespace DepupOfficeDesktop.Forms
                 var o = opens[i];
                 int x = i * slot + (slot - tile) / 2;
                 var card = new CardPanel { Size = new Size(tile, tile), CornerRadius = 26, Location = new Point(x, 0), Cursor = Cursors.Hand };
-                card.Controls.Add(new IconChip { Size = new Size(S(40), S(40)), Bg = Theme.SURFACE, Fg = o.Fg, Icon = o.Icon, Location = new Point((tile - S(40)) / 2, (tile - S(40)) / 2), Cursor = Cursors.Hand });
+                card.Controls.Add(new IconChip { Size = new Size(S(40), S(40)), Bg = Theme.GlassOn ? Color.Transparent : Theme.SURFACE, Fg = o.Fg, Icon = o.Icon, Location = new Point((tile - S(40)) / 2, (tile - S(40)) / 2), Cursor = Cursors.Hand });
                 var cap = L(o.Label, Theme.FontLabel(10.5f), Theme.TEXT, i * slot, tile + S(12), slot, S(24));
                 cap.TextAlign = ContentAlignment.TopCenter;
                 cap.Cursor = Cursors.Hand;
@@ -859,7 +881,7 @@ namespace DepupOfficeDesktop.Forms
                 Width = w,
                 Margin = new Padding(0, S(6), 0, 0),
                 Padding = Padding.Empty,
-                BackColor = Theme.BG
+                BackColor = Theme.PAGE
             };
             FillRecentFilesBox(_recentListPanel, 50, _searchQuery, w);
             p.Controls.Add(_recentListPanel);
@@ -1135,7 +1157,35 @@ namespace DepupOfficeDesktop.Forms
                 seg.SelectedIndex = Theme.Mode;
                 seg.SelectedChanged += i => Theme.SetMode(i);
                 tc.Controls.Add(seg);
-                tc.Height = seg.Bottom + S(20);
+
+                // Efek kaca (Android: "Efek kaca (blur)")
+                int gy = seg.Bottom + S(22);
+                tc.Controls.Add(L("Efek kaca (blur)", Theme.FontLabel(10.5f), Theme.TEXT, S(20), gy));
+                tc.Controls.Add(L("Latar aurora lembut dengan panel kaca buram & transparan. Pilih \"Rata\" bila PC terasa berat.", Theme.FontBody(9.5f), Theme.MUTED, S(20), gy + S(24), cw - S(40), S(40)));
+                var segGlass = new Segmented { Items = new[] { "Kaca blur", "Rata" }, Location = new Point(S(20), gy + S(70)), Width = cw - S(40) };
+                segGlass.SelectedIndex = Theme.GlassOn ? 0 : 1;
+                segGlass.SelectedChanged += i => Theme.SetGlass(i == 0);
+                tc.Controls.Add(segGlass);
+
+                // Ukuran tampilan (zoom antarmuka, seperti VS Code)
+                int zy = segGlass.Bottom + S(22);
+                tc.Controls.Add(L("Ukuran tampilan", Theme.FontLabel(10.5f), Theme.TEXT, S(20), zy));
+                tc.Controls.Add(L("Perbesar / perkecil semua tombol & tulisan. Pintasan: Ctrl + , Ctrl − , Ctrl 0.", Theme.FontBody(9.5f), Theme.MUTED, S(20), zy + S(24), cw - S(40), S(40)));
+                var bMinus = Theme.CreateButton("−", false, Theme.TEXT, S(42), S(52));
+                bMinus.Font = Theme.FontHead(13f);
+                bMinus.Location = new Point(S(20), zy + S(70));
+                bMinus.Click += (s, e) => ChangeZoom(Theme.NextZoom(-1));
+                var zVal = L($"{Math.Round(Theme.Zoom * 100)}%", Theme.FontHead(12f), Theme.TEXT, bMinus.Right + S(6), zy + S(70), S(70), S(42));
+                zVal.TextAlign = ContentAlignment.MiddleCenter;
+                var bPlus = Theme.CreateButton("+", false, Theme.TEXT, S(42), S(52));
+                bPlus.Font = Theme.FontHead(13f);
+                bPlus.Location = new Point(zVal.Right + S(6), zy + S(70));
+                bPlus.Click += (s, e) => ChangeZoom(Theme.NextZoom(+1));
+                var bReset = Theme.CreateButton("Reset 100%", false, Theme.ACCENT, S(42), S(130));
+                bReset.Location = new Point(bPlus.Right + S(12), zy + S(70));
+                bReset.Click += (s, e) => ChangeZoom(1f);
+                tc.Controls.AddRange(new Control[] { bMinus, zVal, bPlus, bReset });
+                tc.Height = bMinus.Bottom + S(20);
                 Add(tc);
 
                 var h2 = CreateSectionHeader("Format bawaan", "", cw); Add(h2); y += S(6);
