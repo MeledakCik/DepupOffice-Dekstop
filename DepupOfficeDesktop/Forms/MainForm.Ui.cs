@@ -77,14 +77,19 @@ namespace DepupOfficeDesktop.Forms
                     if (IsDisposed) return;
                     BeginInvoke(new Action(() =>
                     {
-                        GlassBackdrop.Reset();
                         Theme.ApplyWindowChrome(this);
                         RebuildShellForDpi();
-                        Invalidate(true);
                     }));
                 };
-                // Latar aurora mengikuti ukuran jendela: gambar ulang semua kaca saat ukuran berubah.
-                Resize += (s, e) => { if (Theme.GlassOn) Invalidate(true); };
+                // Latar aurora mengikuti ukuran jendela: gambar ulang kaca setelah selesai mengubah ukuran / maximize.
+                ResizeEnd += (s, e) => { if (Theme.GlassOn) Invalidate(true); };
+                var lastState = WindowState;
+                SizeChanged += (s, e) =>
+                {
+                    if (WindowState == lastState) return;
+                    lastState = WindowState;
+                    if (Theme.GlassOn) Invalidate(true);
+                };
             }
 
             int sideW = S(236);
@@ -191,7 +196,7 @@ namespace DepupOfficeDesktop.Forms
             topBar.HandleCreated += (s, e) => _layoutTopBar?.Invoke();
             _layoutTopBar();
 
-            _contentHost = new Panel
+            _contentHost = new GlassScrollPanel
             {
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
@@ -200,12 +205,6 @@ namespace DepupOfficeDesktop.Forms
                 AllowDrop = true
             };
             Theme.DarkScrollbars(_contentHost);
-            if (Theme.GlassOn)
-            {
-                // kaca menampilkan latar yang diam di belakang jendela: setelah menggulir, gambar ulang (bukan geser piksel lama)
-                _contentHost.Scroll += (s, e) => _contentHost.Invalidate(true);
-                _contentHost.MouseWheel += (s, e) => _contentHost.Invalidate(true);
-            }
             _contentHost.DragEnter += _dragEnterHandler;
             _contentHost.DragDrop += _dragDropHandler;
             _contentHost.SizeChanged += (s, e) =>
@@ -270,6 +269,12 @@ namespace DepupOfficeDesktop.Forms
             Theme.Toast(this, $"Zoom tampilan {Math.Round(Theme.Zoom * 100)}%  •  Ctrl + / Ctrl − / Ctrl 0");
         }
 
+        // ---- IBackdropHost (latar diam untuk sidebar, bilah atas, status bar) ----
+        private readonly GlassBackdrop _formBackdrop = new();
+        GlassBackdrop IBackdropHost.Backdrop => _formBackdrop;
+        Size IBackdropHost.BackdropSize => ClientSize;
+        Point IBackdropHost.DocOffset(Control c) => c == this ? Point.Empty : PointToClient(c.PointToScreen(Point.Empty));
+
         /// <summary>Latar jendela: aurora lembut (efek kaca aktif) atau warna halaman biasa.</summary>
         protected override void OnPaintBackground(PaintEventArgs e)
         {
@@ -281,15 +286,24 @@ namespace DepupOfficeDesktop.Forms
         private void RebuildShellForDpi()
         {
             CloseEmbeddedViewer();
+            Redraw.Suspend(this);   // tidak menampilkan keadaan setengah jadi (tanpa kedip saat zoom / ganti tema)
             SuspendLayout();
             var old = Controls.Cast<Control>().ToList();
             Controls.Clear();
             foreach (var c in old) c.Dispose();
             _navItems.Clear();
             _recentListPanel = null;
-            BuildShell();
-            ResumeLayout(true);
-            SelectTab(_currentTab);
+            try
+            {
+                BuildShell();
+                ResumeLayout(true);
+                SelectTab(_currentTab);
+                if (_navItems.TryGetValue(_currentTab, out var nav)) nav.Focus();   // fokus tidak lari ke kolom cari
+            }
+            finally
+            {
+                Redraw.Resume(this);
+            }
         }
 
         private void SelectTab(int idx)
@@ -318,6 +332,12 @@ namespace DepupOfficeDesktop.Forms
         }
 
         private void RenderCurrentTab()
+        {
+            RenderCurrentTabCore();
+            _contentHost.Invalidate(true);
+        }
+
+        private void RenderCurrentTabCore()
         {
             _contentHost.SuspendLayout();
             var old = _contentHost.Controls.Cast<Control>().ToList();
@@ -349,6 +369,10 @@ namespace DepupOfficeDesktop.Forms
                 case TAB_TOOLS: BuildToolsTab(page); break;
                 default: BuildMeTab(page); break;
             }
+
+            // Layar lebar: konten (maks. lebar baca) diletakkan di tengah, seperti halaman dokumen
+            int extra = Math.Max(0, AvailableWidth() - S(18) - GetContentWidth());
+            page.Padding = new Padding(extra / 2, 0, 0, S(8));
 
             _contentHost.Controls.Add(page);
             _builtAvailWidth = AvailableWidth();
