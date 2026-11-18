@@ -11,7 +11,8 @@ namespace DepupOfficeDesktop.Controls
     {
         Pdf, Word, Excel, Folder, Speaker, Printer, Qr, Merge, Split, Organize,
         Image, ImagePdf, Compress, Scan, Batch, Lock, Signature, Sliders, Theme,
-        Vault, Letter, Person, Receipt, Calendar, Edit, Camera
+        Vault, Letter, Person, Receipt, Calendar, Edit, Camera,
+        Upload, Download, Share, Heart, Mail, Shield, Search, Chat, Wand, Check, Grid
     }
 
     /// <summary>
@@ -256,6 +257,72 @@ namespace DepupOfficeDesktop.Controls
                 case CardIcon.Edit:
                     Line(4, 20.5f, 20, 20.5f);
                     Closed(6, 17, 7, 12.5f, 16, 3.5f, 19.5f, 7, 10.5f, 16);
+                    break;
+                case CardIcon.Upload:
+                    Line(12, 15, 12, 4);
+                    Poly(7.5f, 8.5f, 12, 4, 16.5f, 8.5f);
+                    Poly(4, 15, 4, 20, 20, 20, 20, 15);
+                    break;
+                case CardIcon.Download:
+                    Line(12, 4, 12, 15);
+                    Poly(7.5f, 10.5f, 12, 15, 16.5f, 10.5f);
+                    Poly(4, 15, 4, 20, 20, 20, 20, 15);
+                    break;
+                case CardIcon.Share:
+                    g.DrawEllipse(pen, R(15, 3, 5, 5));
+                    g.DrawEllipse(pen, R(4, 9.5f, 5, 5));
+                    g.DrawEllipse(pen, R(15, 16, 5, 5));
+                    Line(8.6f, 10.8f, 15.4f, 6.7f);
+                    Line(8.6f, 13.2f, 15.4f, 17.3f);
+                    break;
+                case CardIcon.Heart:
+                    using (var hp = new System.Drawing.Drawing2D.GraphicsPath())
+                    {
+                        hp.AddBezier(P(12, 20), P(9, 17.5f), P(3, 13.5f), P(3, 8.5f));
+                        hp.AddBezier(P(3, 8.5f), P(3, 5), P(5.5f, 3.5f), P(7.8f, 3.5f));
+                        hp.AddBezier(P(7.8f, 3.5f), P(9.8f, 3.5f), P(11.2f, 4.7f), P(12, 6.3f));
+                        hp.AddBezier(P(12, 6.3f), P(12.8f, 4.7f), P(14.2f, 3.5f), P(16.2f, 3.5f));
+                        hp.AddBezier(P(16.2f, 3.5f), P(18.5f, 3.5f), P(21, 5), P(21, 8.5f));
+                        hp.AddBezier(P(21, 8.5f), P(21, 13.5f), P(15, 17.5f), P(12, 20));
+                        g.DrawPath(pen, hp);
+                    }
+                    break;
+                case CardIcon.Mail:
+                    Box(3, 5.5f, 18, 13, 2);
+                    Poly(3.5f, 6.5f, 12, 13, 20.5f, 6.5f);
+                    break;
+                case CardIcon.Shield:
+                    Closed(12, 3, 19.5f, 6, 19, 13, 12, 21, 5, 13, 4.5f, 6);
+                    Poly(8.5f, 12, 11, 14.5f, 15.5f, 9.5f);
+                    break;
+                case CardIcon.Search:
+                    g.DrawEllipse(pen, R(4, 4, 12, 12));
+                    Line(14.5f, 14.5f, 20, 20);
+                    break;
+                case CardIcon.Chat:
+                    Closed(4, 5, 20, 5, 20, 16, 10, 16, 6, 20, 6, 16, 4, 16);
+                    Line(8, 9.5f, 16, 9.5f);
+                    Line(8, 12.5f, 13, 12.5f);
+                    break;
+                case CardIcon.Wand:
+                    Line(4, 20, 15, 9);
+                    Line(13.5f, 7.5f, 16.5f, 10.5f);
+                    Line(18, 3, 18, 6);
+                    Line(16.5f, 4.5f, 19.5f, 4.5f);
+                    Line(9, 4, 9, 6);
+                    Line(8, 5, 10, 5);
+                    Line(20, 11, 20, 13);
+                    Line(19, 12, 21, 12);
+                    break;
+                case CardIcon.Check:
+                    g.DrawEllipse(pen, R(3, 3, 18, 18));
+                    Poly(8, 12.5f, 11, 15.5f, 16.5f, 9);
+                    break;
+                case CardIcon.Grid:
+                    Box(4, 4, 7, 7, 2);
+                    Box(13, 4, 7, 7, 2);
+                    Box(4, 13, 7, 7, 2);
+                    Box(13, 13, 7, 7, 2);
                     break;
                 case CardIcon.Camera:
                     Box(3, 7, 18, 13, 2.5f);

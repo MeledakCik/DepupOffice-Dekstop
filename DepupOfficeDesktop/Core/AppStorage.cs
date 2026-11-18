@@ -34,6 +34,7 @@ namespace DepupOfficeDesktop.Core
 
         // PdfSettings (Util.kt)
         public float PdfDefaultZoom { get; set; } = 1.0f;
+        public int ThemeMode { get; set; } = 0;      // 0 = Ikuti Windows, 1 = Terang, 2 = Gelap (Saya › Tampilan)
         public int PdfReaderTheme { get; set; } = 0; // 0 = Siang, 1 = Malam, 2 = Sepia, 3 = Eye-Care
         public bool PdfSmoothScroll { get; set; } = true;
 

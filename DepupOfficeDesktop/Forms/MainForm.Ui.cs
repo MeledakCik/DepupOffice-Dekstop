@@ -11,8 +11,11 @@ using DepupOfficeDesktop.Core;
 namespace DepupOfficeDesktop.Forms
 {
     /// <summary>
-    /// Lapisan tampilan jendela utama. Semua ukuran memakai Theme.S() (skala DPI) sehingga teks tidak lagi
-    /// terpotong di layar 125% / 150% / 200%. Halaman dibangun ulang saat lebar area konten berubah.
+    /// Lapisan tampilan jendela utama — versi desktop dari layar Android (MainActivity.kt):
+    /// Beranda · Dokumen · Buat · Alat · Saya. Token warna, komponen (kartu rata, tombol pil, ubin ikon, daftar
+    /// berkelompok, segmen) dan tema terang/gelap sama dengan Android; tata letaknya memakai lebar layar PC
+    /// (navigasi samping, grid 3–4 kolom, dua kolom berdampingan, status bar).
+    /// Semua ukuran memakai Theme.S() (skala DPI); halaman dibangun ulang saat lebar area konten berubah.
     /// </summary>
     public partial class MainForm
     {
@@ -27,6 +30,13 @@ namespace DepupOfficeDesktop.Forms
         private System.Windows.Forms.Timer? _reflowTimer;
         private DragEventHandler _dragEnterHandler = null!;
         private DragEventHandler _dragDropHandler = null!;
+        private bool _themeHooked;
+
+        // Dokumen: 0 = Terkini, 1 = Ditandai, 2 = Hasil olahan; kategori hasil olahan
+        private int _docsMode;
+        private string _docsCat = "Semua";
+
+        private const int TAB_HOME = 0, TAB_DOCS = 1, TAB_CREATE = 2, TAB_TOOLS = 3, TAB_ME = 4;
 
         // ================= RANGKA JENDELA =================
 
@@ -56,151 +66,129 @@ namespace DepupOfficeDesktop.Forms
 
         private void BuildShell()
         {
-            int sideW = S(244);
-
-            // ---------- Sidebar (gaya panel navigasi WPS / Office: gelap, rapat, penanda aktif) ----------
-            var sidebar = new Panel { Dock = DockStyle.Left, Width = sideW, BackColor = Theme.SIDEBAR };
-            int innerW = sideW - S(32) - 1;
-
-            // Merek: ubin logo gradasi biru → ungu + nama + keterangan kecil
-            var brand = new Panel { Dock = DockStyle.Top, Height = S(132), BackColor = Theme.SIDEBAR };
-            var logo = new CardPanel
+            BackColor = Theme.BG;
+            if (!_themeHooked)
             {
-                Size = new Size(S(38), S(38)),
-                CornerRadius = 10,
-                BorderThickness = 0,
-                GradientStart = Theme.BRAND,
-                GradientEnd = Theme.VIOLET,
-                Location = new Point(S(18), S(20))
-            };
-            var logoLbl = L("D", Theme.FontHead(15f), Color.White, 0, 0, S(38), S(38));
-            logoLbl.TextAlign = ContentAlignment.MiddleCenter;
-            logo.Controls.Add(logoLbl);
+                _themeHooked = true;
+                // Tema berganti (Saya › Tampilan atau Windows berpindah terang/gelap): bangun ulang seluruh tampilan.
+                Theme.Changed += () =>
+                {
+                    if (IsDisposed) return;
+                    BeginInvoke(new Action(() =>
+                    {
+                        Theme.ApplyWindowChrome(this);
+                        RebuildShellForDpi();
+                    }));
+                };
+            }
+
+            int sideW = S(236);
+
+            // ---------- Navigasi samping (padanan navigasi bawah Android) ----------
+            var sidebar = new Panel { Dock = DockStyle.Left, Width = sideW, BackColor = Theme.BG };
+            int innerW = sideW - S(32);
+
+            var brand = new Panel { Dock = DockStyle.Top, Height = S(150), BackColor = Theme.BG };
+            var logo = new LogoTile { Size = new Size(S(40), S(40)), Location = new Point(S(18), S(20)), Cursor = Cursors.Hand };
+            logo.Click += (s, e) => SelectTab(TAB_HOME);
             brand.Controls.Add(logo);
-            brand.Controls.Add(L("Depup Office", Theme.FontHead(13.5f), Theme.TEXT, S(66), S(18)));
-            brand.Controls.Add(L("OFFLINE WORKSPACE", Theme.FontMono(7.5f), Theme.ACCENT_LIGHT, S(67), S(42)));
-            var btnEditPdf = Theme.CreateButton("Edit PDF Cepat", false, Theme.ACCENT, S(42), innerW);
-            btnEditPdf.Font = Theme.FontLabel(10f);
-            btnEditPdf.Location = new Point(S(16), S(76));
+            brand.Controls.Add(L("Depup Office", Theme.FontHead(13.5f), Theme.TEXT, S(68), S(19)));
+            brand.Controls.Add(L("100% offline", Theme.FontBody(9f), Theme.MUTED, S(69), S(41)));
+            // Tombol utama (padanan tombol Scan biru di tengah navigasi Android)
+            var btnEditPdf = Theme.CreateButton("Edit PDF", true, Theme.ACCENT, S(46), innerW);
+            btnEditPdf.Font = Theme.FontLabel(10.5f);
+            btnEditPdf.Location = new Point(S(16), S(84));
             btnEditPdf.Click += (s, e) => StartPdfEditorFlow();
             brand.Controls.Add(btnEditPdf);
 
-            // Menu utama (Dock=Top ditumpuk terbalik, jadi ditambahkan dari bawah ke atas)
-            var nav = new Panel { Dock = DockStyle.Fill, BackColor = Theme.SIDEBAR, Padding = new Padding(S(12), S(4), S(12), 0) };
-            string[] navNames = { "Baca Dokumen", "Tools PDF", "Buat Dokumen", "Brankas & Simpan" };
-            NavItemIcon[] navIcons = { NavItemIcon.Book, NavItemIcon.Pdf, NavItemIcon.Scan, NavItemIcon.Vault };
-            for (int i = navNames.Length - 1; i >= 0; i--)
+            var nav = new Panel { Dock = DockStyle.Fill, BackColor = Theme.BG, Padding = new Padding(S(16), S(2), S(16), 0) };
+            string[] navNames = { "Beranda", "Dokumen", "Buat", "Alat", "Saya" };
+            NavItemIcon[] navIcons = { NavItemIcon.Home, NavItemIcon.Docs, NavItemIcon.Create, NavItemIcon.Tools, NavItemIcon.User };
+            for (int i = navNames.Length - 1; i >= 0; i--)   // Dock=Top: yang ditambahkan terakhir berada paling atas
             {
                 int idx = i;
-                var item = new NavItem { Caption = navNames[i], Icon = navIcons[i], Dock = DockStyle.Top, Height = S(44) };
+                var item = new NavItem { Caption = navNames[i], Icon = navIcons[i], Dock = DockStyle.Top, Height = S(50) };
                 item.Click += (s, e) => SelectTab(idx);
                 _navItems[idx] = item;
                 nav.Controls.Add(item);
             }
-            nav.Controls.Add(new Panel { Dock = DockStyle.Top, Height = S(6), BackColor = Theme.SIDEBAR });
-            var navCap = L("MENU", Theme.FontMono(7.5f), Theme.FAINT, S(16), S(6));
-            var navCapHost = new Panel { Dock = DockStyle.Top, Height = S(26), BackColor = Theme.SIDEBAR };
-            navCapHost.Controls.Add(navCap);
-            nav.Controls.Add(navCapHost);
 
-            // Kartu penyimpanan lokal (data nyata dari disk) + tautan bawah
-            var bottom = new Panel { Dock = DockStyle.Bottom, Height = S(4 * 36 + 112), BackColor = Theme.SIDEBAR, Padding = new Padding(S(12), S(8), S(12), S(10)) };
+            // Bawah: kartu kecil penyimpanan (data nyata dari disk)
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = S(104), BackColor = Theme.BG, Padding = new Padding(S(16), S(4), S(16), S(16)) };
             var (dFree, dTotal) = AppStorage.GetDeviceStorage();
-            var storeCard = new CardPanel { Dock = DockStyle.Top, Height = S(84), BackColor = Theme.SURFACE, CornerRadius = 12 };
-            storeCard.Controls.Add(L("Disk lokal", Theme.FontBody(8.5f), Theme.MUTED, S(12), S(10)));
-            var usedLbl = L($"{AppStorage.FmtGb(dTotal - dFree)} / {AppStorage.FmtGb(dTotal)}", Theme.FontMono(8f), Theme.ACCENT_LIGHT, 0, S(11), innerW - S(14), S(18));
-            usedLbl.TextAlign = ContentAlignment.TopRight;
-            storeCard.Controls.Add(usedLbl);
+            var storeCard = new CardPanel { Dock = DockStyle.Fill, BackColor = Theme.SURFACE, CornerRadius = 18, Cursor = Cursors.Hand };
+            storeCard.Controls.Add(L("Penyimpanan PC", Theme.FontLabel(9f), Theme.TEXT, S(14), S(12)));
+            storeCard.Controls.Add(L($"{AppStorage.FmtGb(dFree)} tersisa dari {AppStorage.FmtGb(dTotal)}", Theme.FontBody(8.5f), Theme.MUTED, S(14), S(32), innerW - S(28), S(18), true));
             storeCard.Controls.Add(new StackedStorageBar
             {
-                Location = new Point(S(12), S(36)),
-                Size = new Size(innerW - S(24), S(6)),
-                TrackColor = Theme.SURFACE3,
+                Location = new Point(S(14), S(58)),
+                Size = new Size(innerW - S(28), S(6)),
+                TrackColor = Theme.SURFACE2,
                 Parts = new List<(long, Color)> { (Math.Max(1, dTotal - dFree), Theme.ACCENT), (Math.Max(1, dFree), Color.Transparent) }
             });
-            storeCard.Controls.Add(new Pill { Text = "Offline • tanpa unggah", Dot = Theme.SUCCESS, Fg = Theme.MUTED, Bg = Color.Transparent, Font = Theme.FontBody(8f), Location = new Point(S(4), S(52)) });
-            string[] linkNames = { "Privacy Policy", "Kontak Developer", "Dukung Developer", "Tentang" };
-            NavItemIcon[] linkIcons = { NavItemIcon.Privacy, NavItemIcon.Contact, NavItemIcon.Donate, NavItemIcon.About };
-            Action[] linkActions =
-            {
-                () => OpenPrivacyPolicyForm(),
-                () => PrivacyManager.OpenDeveloperEmail(),
-                () => PrivacyManager.OpenSaweriaDonation(),
-                () => ShowAboutDialog()
-            };
-            var links = new Panel { Dock = DockStyle.Fill, BackColor = Theme.SIDEBAR };
-            for (int i = linkNames.Length - 1; i >= 0; i--)
-            {
-                var act = linkActions[i];
-                var item = new NavItem { Caption = linkNames[i], Icon = linkIcons[i], Dock = DockStyle.Top, Height = S(36), Muted = true, Font = Theme.FontLabel(9f) };
-                item.Click += (s, e) => act();
-                links.Controls.Add(item);
-            }
-            // urutan dock: yang ditambahkan terakhir menempati posisi paling atas
-            bottom.Controls.Add(links);
-            bottom.Controls.Add(new Panel { Dock = DockStyle.Top, Height = S(10), BackColor = Theme.SIDEBAR });
+            void OpenMe(object? s, EventArgs e) => SelectTab(TAB_ME);
+            storeCard.Click += OpenMe;
+            foreach (Control c in storeCard.Controls) c.Click += OpenMe;
             bottom.Controls.Add(storeCard);
 
             sidebar.Controls.Add(nav);
             sidebar.Controls.Add(bottom);
             sidebar.Controls.Add(brand);
-            sidebar.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 1, BackColor = Theme.LINE }); // garis pemisah
+            sidebar.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 1, BackColor = Theme.LINE });
 
-            // ---------- Area kanan: top bar + konten ----------
+            // ---------- Area kanan: bilah atas + konten ----------
             var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.BG };
             _rightHost = right;
-            var topBar = new Panel { Dock = DockStyle.Top, Height = S(64), BackColor = Theme.BG };
+            var topBar = new Panel { Dock = DockStyle.Top, Height = S(72), BackColor = Theme.BG };
             topBar.Paint += (s, e) =>
             {
                 using var pen = new Pen(Theme.LINE);
                 e.Graphics.DrawLine(pen, 0, topBar.Height - 1, topBar.Width, topBar.Height - 1);
             };
 
-            // Judul tab kini tampil besar di dalam konten; label ini disimpan tersembunyi.
-            _barTitleLbl = L(_tabNames[Math.Clamp(_currentTab, 0, 3)], Theme.FontHead(17f), Theme.TEXT, 0, 0);
+            _barTitleLbl = L(_tabNames[Math.Clamp(_currentTab, 0, _tabNames.Length - 1)], Theme.FontHead(17f), Theme.TEXT, 0, 0);
             _barTitleLbl.Visible = false;
-            _searchBox = new SearchBox { Height = S(40) };
-            _searchBox.Input.PlaceholderText = "Cari dokumen terakhir…";
+            _searchBox = new SearchBox { Height = S(48) };
+            _searchBox.Input.PlaceholderText = "Cari dokumen…";
             _searchBox.Input.Text = _searchQuery;
             _searchBox.Input.TextChanged += (s, e) =>
             {
                 CloseEmbeddedViewer();
                 _searchQuery = _searchBox.Input.Text.Trim();
-                if (_currentTab != 0)
+                // Seperti Android: mengetik di kolom cari langsung menampilkan hasil di Dokumen.
+                if (_currentTab != TAB_DOCS || _docsMode == 2)
                 {
-                    SelectTab(0);
+                    if (_docsMode == 2) _docsMode = 0;
+                    SelectTab(TAB_DOCS);
+                    _searchBox.Input.Focus();
+                    _searchBox.Input.SelectionStart = _searchBox.Input.TextLength;
                     return;
                 }
                 if (_recentListPanel != null)
-                    FillRecentFilesBox(_recentListPanel, 10, _searchQuery, _recentRowWidth);
+                    FillRecentFilesBox(_recentListPanel, 50, _searchQuery, _recentRowWidth);
             };
 
-            var badge = new Pill { Text = "Lokal • " + AppStorage.FmtGb(dTotal - dFree) + " terpakai", Dot = Theme.CYAN, Fg = Theme.MUTED, Bg = Theme.SURFACE, Outline = Theme.LINE, Font = Theme.FontMono(8f) };
-            var offline = new Pill { Text = "Offline", Dot = Theme.SUCCESS, Fg = Theme.SUCCESS, Bg = Theme.SUCCESS_BG, Outline = Theme.Mix(Theme.SUCCESS_BG, Theme.SUCCESS, 0.35), Font = Theme.FontLabel(8.5f) };
-            var avatar = new CircleButton { Size = new Size(S(36), S(36)), Cursor = Cursors.Hand };
-            avatar.Click += (s, e) => ShowAboutDialog();
+            var themeBtn = new CircleButton { Size = new Size(S(46), S(46)), Cursor = Cursors.Hand, Glyph = Theme.Dark ? CircleGlyph.Sun : CircleGlyph.Moon };
+            themeBtn.AccessibleName = Theme.Dark ? "Ganti ke tema terang" : "Ganti ke tema gelap";
+            themeBtn.Pressed += (s, e) => Theme.SetMode(Theme.Dark ? Theme.MODE_LIGHT : Theme.MODE_DARK);
+            var avatar = new CircleButton { Size = new Size(S(46), S(46)), Cursor = Cursors.Hand, Glyph = CircleGlyph.Person };
+            avatar.AccessibleName = "Saya — brankas, penyimpanan, tampilan";
+            avatar.Pressed += (s, e) => SelectTab(TAB_ME);
 
-            topBar.Controls.AddRange(new Control[] { _barTitleLbl, _searchBox, offline, badge, avatar });
-
+            topBar.Controls.AddRange(new Control[] { _barTitleLbl, _searchBox, themeBtn, avatar });
+            themeBtn.BringToFront();
+            avatar.BringToFront();
             _layoutTopBar = () =>
             {
-                int padX = S(28);
+                int padX = S(32);
                 int h = topBar.ClientSize.Height;
                 int wAll = topBar.ClientSize.Width;
                 avatar.Location = new Point(wAll - padX - avatar.Width, (h - avatar.Height) / 2);
-                int searchLeft = padX;
-                int rightEdge = avatar.Left - S(12);
-                badge.Location = new Point(Math.Max(0, rightEdge - badge.Width), (h - badge.Height) / 2);
-                badge.Visible = rightEdge - searchLeft > S(700);
-                if (badge.Visible) rightEdge = badge.Left - S(8);
-                offline.Location = new Point(Math.Max(0, rightEdge - offline.Width), (h - offline.Height) / 2);
-                offline.Visible = rightEdge - searchLeft > S(520);
-                if (offline.Visible) rightEdge = offline.Left - S(16);
-                int sw = Math.Max(S(120), Math.Min(S(520), rightEdge - searchLeft));
-                _searchBox.SetBounds(searchLeft, (h - S(40)) / 2, sw, S(40));
+                themeBtn.Location = new Point(avatar.Left - S(10) - themeBtn.Width, (h - themeBtn.Height) / 2);
+                int sw = Math.Max(S(160), Math.Min(S(560), themeBtn.Left - S(24) - padX));
+                _searchBox.SetBounds(padX, (h - S(48)) / 2, sw, S(48));
             };
             topBar.Resize += (s, e) => _layoutTopBar?.Invoke();
-            badge.SizeChanged += (s, e) => _layoutTopBar?.Invoke();
             topBar.HandleCreated += (s, e) => _layoutTopBar?.Invoke();
             _layoutTopBar();
 
@@ -208,7 +196,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                Padding = new Padding(S(28), S(6), S(28), S(28)),
+                Padding = new Padding(S(32), S(6), S(32), S(32)),
                 BackColor = Theme.BG,
                 AllowDrop = true
             };
@@ -225,8 +213,8 @@ namespace DepupOfficeDesktop.Forms
             right.Controls.Add(_contentHost);
             right.Controls.Add(topBar);
 
-            // ---------- Status bar (seperti MS Word / WPS): info nyata, tanpa klaim berlebihan ----------
-            var status = new Panel { Dock = DockStyle.Bottom, Height = S(26), BackColor = Theme.SIDEBAR };
+            // ---------- Status bar khas desktop (seperti MS Word / WPS) ----------
+            var status = new Panel { Dock = DockStyle.Bottom, Height = S(28), BackColor = Theme.SURFACE };
             status.Paint += (s, e) =>
             {
                 using var pen = new Pen(Theme.LINE);
@@ -234,30 +222,30 @@ namespace DepupOfficeDesktop.Forms
             };
             Label StatusText(string text, Color color, DockStyle dock)
             {
-                var l = new Label
+                using var f = Theme.FontBody(8.5f);
+                return new Label
                 {
                     Text = text,
                     Dock = dock,
                     AutoSize = false,
-                    Width = TextRenderer.MeasureText(text, Theme.FontMono(8f)).Width + S(28),
+                    Width = TextRenderer.MeasureText(text, f).Width + S(30),
                     TextAlign = ContentAlignment.MiddleLeft,
-                    Font = Theme.FontMono(8f),
+                    Font = Theme.FontBody(8.5f),
                     ForeColor = color,
-                    BackColor = Theme.SIDEBAR,
+                    BackColor = Theme.SURFACE,
                     UseMnemonic = false,
-                    Padding = new Padding(S(12), 0, S(8), 0)
+                    AutoEllipsis = true,
+                    Padding = new Padding(S(14), 0, S(8), 0)
                 };
-                return l;
             }
-            status.Controls.Add(StatusText("Penyimpanan: " + AppStorage.OutDir, Theme.FAINT, DockStyle.Fill));
-            status.Controls.Add(StatusText($"{Theme.AppName} {Theme.AppVersion}", Theme.ACCENT_LIGHT, DockStyle.Right));
-            status.Controls.Add(StatusText("●  Offline — berkas tidak pernah diunggah", Theme.SUCCESS, DockStyle.Left));
+            status.Controls.Add(StatusText("Hasil disimpan di " + AppStorage.OutDir, Theme.MUTED, DockStyle.Fill));
+            status.Controls.Add(StatusText($"Depup Office {Theme.AppVersion}  ·  Tema {(Theme.Mode == Theme.MODE_SYSTEM ? "ikut Windows" : Theme.Dark ? "gelap" : "terang")}", Theme.MUTED, DockStyle.Right));
+            status.Controls.Add(StatusText("●  100% offline — berkas tidak pernah diunggah", Theme.SUCCESS, DockStyle.Left));
 
             Controls.Add(right);
             Controls.Add(sidebar);
             Controls.Add(status);
 
-            // Fokus awal ke menu aktif (bukan kolom cari) agar teks petunjuk "Cari dokumen…" tetap terlihat.
             if (!_initialFocusHooked)
             {
                 _initialFocusHooked = true;
@@ -267,7 +255,7 @@ namespace DepupOfficeDesktop.Forms
 
         private bool _initialFocusHooked;
 
-        /// <summary>Dipanggil saat DPI monitor berubah (mis. jendela dipindah ke layar lain): bangun ulang rangka & halaman.</summary>
+        /// <summary>Bangun ulang rangka & halaman (DPI monitor berubah atau tema berganti).</summary>
         private void RebuildShellForDpi()
         {
             CloseEmbeddedViewer();
@@ -286,10 +274,10 @@ namespace DepupOfficeDesktop.Forms
         {
             CloseEmbeddedViewer();
             bool changed = idx != _currentTab;
-            _currentTab = idx;
-            _barTitleLbl.Text = _tabNames[Math.Clamp(idx, 0, _tabNames.Length - 1)];
+            _currentTab = Math.Clamp(idx, 0, _tabNames.Length - 1);
+            _barTitleLbl.Text = _tabNames[_currentTab];
             foreach (var (k, item) in _navItems)
-                item.Active = k == idx;
+                item.Active = k == _currentTab;
             _layoutTopBar?.Invoke();
             RenderCurrentTab();
             if (changed) _contentHost.AutoScrollPosition = Point.Empty;   // halaman baru mulai dari atas
@@ -304,7 +292,7 @@ namespace DepupOfficeDesktop.Forms
         private int GetContentWidth()
         {
             // Sisakan ruang untuk scrollbar vertikal agar tidak muncul scrollbar horizontal.
-            return Math.Max(S(320), Math.Min(S(1120), AvailableWidth() - S(18)));
+            return Math.Max(S(320), Math.Min(S(1180), AvailableWidth() - S(18)));
         }
 
         private void RenderCurrentTab()
@@ -333,10 +321,11 @@ namespace DepupOfficeDesktop.Forms
 
             switch (_currentTab)
             {
-                case 0: BuildBacaTab(page); break;
-                case 1: BuildToolsTab(page); break;
-                case 2: BuildBuatTab(page); break;
-                default: BuildSimpanTab(page); break;
+                case TAB_HOME: BuildHomeTab(page); break;
+                case TAB_DOCS: BuildDocsTab(page); break;
+                case TAB_CREATE: BuildCreateTab(page); break;
+                case TAB_TOOLS: BuildToolsTab(page); break;
+                default: BuildMeTab(page); break;
             }
 
             _contentHost.Controls.Add(page);
@@ -353,50 +342,35 @@ namespace DepupOfficeDesktop.Forms
             return "Selamat malam";
         }
 
-        // ================= KOMPONEN PEMBANTU UI =================
+        // ================= KOMPONEN (padanan Ui.kt Android) =================
 
-        /// <summary>Judul halaman gaya Android: judul tampilan besar + keterangan abu (eyebrow opsional di atasnya).</summary>
-        private Control CreateHeading(int width, string eyebrow, string title, string? subtitle = null)
+        /// <summary>Judul layar (Android heading: judul 24sp tebal + keterangan abu).</summary>
+        private Control CreateHeading(int width, string title, string? subtitle = null)
         {
-            var panel = new Panel { Width = width, Margin = new Padding(0, S(16), 0, S(16)) };
-            int y = 0;
-            if (!string.IsNullOrEmpty(eyebrow))
-            {
-                var eb = L(eyebrow.ToUpperInvariant(), Theme.FontMono(8.5f), Theme.ACCENT_LIGHT, 0, y);
-                panel.Controls.Add(eb);
-                y += eb.PreferredHeight + S(6);
-            }
-            var t = L(title, Theme.FontDisplay(24f), Theme.TEXT, -S(2), y);
+            var panel = new Panel { Width = width, Margin = new Padding(0, S(18), 0, S(14)) };
+            var t = L(title, Theme.FontDisplay(26f), Theme.TEXT, -S(2), 0);
             panel.Controls.Add(t);
-            y += t.PreferredHeight;
+            int y = t.PreferredHeight;
             if (subtitle != null)
             {
-                var font = Theme.FontBody(10.5f);
+                var font = Theme.FontBody(11f);
                 int sh = TextRenderer.MeasureText(subtitle, font, new Size(width, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
-                panel.Controls.Add(L(subtitle, font, Theme.MUTED, 0, y + S(6), width, sh));
-                y += S(6) + sh;
+                panel.Controls.Add(L(subtitle, font, Theme.MUTED, 0, y + S(4), width, sh));
+                y += S(4) + sh;
             }
             panel.Height = y + S(2);
             return panel;
         }
 
+        /// <summary>Judul seksi (Android sectionTitle) + tautan/keterangan opsional di kanan.</summary>
         private Control CreateSectionHeader(string title, string badgeOrLink, int width, Action? onLinkClick = null)
         {
-            var panel = new Panel { Width = width, Height = S(34), Margin = new Padding(0, S(18), 0, S(4)) };
-            var titleLbl = L(title.ToUpperInvariant(), Theme.FontLabel(9f), Theme.MUTED, 0, S(8));
+            var panel = new Panel { Width = width, Height = S(38), Margin = new Padding(0, S(20), 0, S(6)) };
+            var titleLbl = L(title, Theme.FontHead(14.5f), Theme.TEXT, 0, S(4));
             panel.Controls.Add(titleLbl);
-            panel.Paint += (s, e) =>
-            {
-                // garis tipis memanjang setelah judul (pemisah grup)
-                int tx = titleLbl.Right + S(12);
-                int lx = panel.Controls.Count > 1 ? panel.Controls[1].Left - S(12) : panel.Width;
-                if (lx - tx > S(20))
-                    using (var pen = new Pen(Theme.LINE)) e.Graphics.DrawLine(pen, tx, S(17), lx, S(17));
-            };
-
             if (onLinkClick != null)
             {
-                var link = L(badgeOrLink, Theme.FontLabel(9f), Theme.ACCENT_LIGHT, 0, S(8));
+                var link = L(badgeOrLink, Theme.FontLabel(10f), Theme.ACCENT_LIGHT, 0, S(9));
                 link.Cursor = Cursors.Hand;
                 link.Click += (s, e) => onLinkClick();
                 link.Left = width - link.GetPreferredSize(Size.Empty).Width;
@@ -404,43 +378,38 @@ namespace DepupOfficeDesktop.Forms
             }
             else if (!string.IsNullOrEmpty(badgeOrLink))
             {
-                int tw = TextRenderer.MeasureText(title, titleLbl.Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Width;
-                var meta = L(badgeOrLink, Theme.FontMono(8f), Theme.FAINT, 0, S(9));
+                var meta = L(badgeOrLink, Theme.FontBody(9.5f), Theme.MUTED, 0, S(9));
                 meta.Left = width - meta.GetPreferredSize(Size.Empty).Width;
                 panel.Controls.Add(meta);
             }
             return panel;
         }
 
+        /// <summary>Ubin alat (Android tile): ikon di wadah lembut sewarna, judul tebal, keterangan abu, lencana opsional.</summary>
         private Control CreateFeatureTile(int width, string title, string sub, string tag, Color accent, Color accentBg, Action onClick)
         {
-            int pad = S(18);
+            int pad = S(20);
             int innerW = Math.Max(S(60), width - pad * 2);
-            var subFont = Theme.FontBody(9f);
+            var subFont = Theme.FontBody(9.5f);
             int lineH = TextRenderer.MeasureText("Ag", subFont, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Height;
-            int subH = TextRenderer.MeasureText(sub, subFont, new Size(innerW, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Height;
-            subH = Math.Min(Math.Max(subH, lineH), lineH * 3);
+            // ukur sedikit lebih sempit dari label agar baris ke-2/3 tidak terpotong
+            int subH = TextRenderer.MeasureText(sub, subFont, new Size(innerW - S(10), int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
+            subH = Math.Min(Math.Max(subH, lineH), lineH * 3) + S(4);
 
-            // Gaya Android: ikon berwarna kategori di wadah lembut sewarna, kartu putih tanpa garis.
-            int chipSize = S(40);
-            int titleY = pad + chipSize + S(12);
-            int titleH = S(24);
+            int chipSize = S(46);
+            int titleY = pad + chipSize + S(14);
+            int titleH = S(26);
             int subY = titleY + titleH + S(2);
-            var card = new CardPanel { Width = width, Height = subY + subH + pad, Cursor = Cursors.Hand, CornerRadius = 14 };
+            var card = new CardPanel { Width = width, Height = subY + subH + pad, Cursor = Cursors.Hand, CornerRadius = 22 };
 
-            var chip = new IconChip { Size = new Size(chipSize, chipSize), Radius = S(10), Bg = accentBg, Fg = accent, Icon = ResolveCardIcon(title), Location = new Point(pad, pad) };
-
-            var lblTitle = L(title, Theme.FontHead(11.5f), Theme.TEXT, pad, titleY, innerW, titleH, true);
-            lblTitle.Cursor = Cursors.Hand;
-            var lblSub = L(sub, subFont, Theme.MUTED, pad, subY, innerW, subH);
-            lblSub.Cursor = Cursors.Hand;
-
+            var chip = new IconChip { Size = new Size(chipSize, chipSize), Radius = S(14), Bg = accentBg, Fg = accent, Icon = ResolveCardIcon(title), Location = new Point(pad, pad) };
+            var lblTitle = L(title, Theme.FontHead(12f), Theme.TEXT, pad, titleY, innerW, titleH, true);
+            var lblSub = L(sub, subFont, Theme.MUTED, pad, subY, innerW, subH, true);
             card.Controls.AddRange(new Control[] { chip, lblTitle, lblSub });
 
-            // Lencana tag: hanya tampil bila muat di sebelah kanan ikon (tile sempit tidak bertabrakan).
             if (!string.IsNullOrWhiteSpace(tag))
             {
-                var pill = new Pill { Text = tag, Fg = accent, Bg = accentBg, Outline = Theme.Mix(accentBg, accent, 0.3), Font = Theme.FontMono(7.5f), Radius = S(6) };
+                var pill = new Pill { Text = tag, Fg = accent, Bg = accentBg, Font = Theme.FontLabel(8.5f) };
                 int room = width - pad * 2 - chipSize - S(10);
                 if (pill.Width <= room)
                 {
@@ -452,9 +421,747 @@ namespace DepupOfficeDesktop.Forms
 
             void Fire(object? s, EventArgs e) => RunGuarded(onClick);
             card.Click += Fire;
-            foreach (Control c in card.Controls) c.Click += Fire;
+            foreach (Control c in card.Controls) { c.Click += Fire; c.Cursor = Cursors.Hand; }
             card.AttachHover();
             return card;
+        }
+
+        /// <summary>Kartu berisi baris-baris (Android listCard): daftar yang dikelompokkan dengan garis pemisah.</summary>
+        private CardPanel CreateListCard(int width, IList<ListRow> rows)
+        {
+            int pad = S(6);
+            var card = new CardPanel { Width = width, CornerRadius = 22, Padding = new Padding(pad) };
+            int y = pad;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
+                r.Divider = i < rows.Count - 1;
+                r.SetBounds(pad, y, width - pad * 2, r.Height);
+                card.Controls.Add(r);
+                y += r.Height;
+            }
+            card.Height = y + pad;
+            return card;
+        }
+
+        private ListRow Row(CardIcon icon, Color fg, Color bg, string title, string sub, Action onClick)
+        {
+            var r = new ListRow { Icon = icon, IconFg = fg, IconBg = bg, Title = title, Subtitle = sub };
+            r.Click += (s, e) => RunGuarded(onClick);
+            return r;
+        }
+
+        /// <summary>Kartu kosong (Android emptyState): ikon, judul, penjelasan.</summary>
+        private Control CreateEmptyState(int width, CardIcon icon, string title, string text)
+        {
+            var card = new CardPanel { Width = width, Height = S(170), CornerRadius = 22, Margin = new Padding(0, 0, 0, S(12)) };
+            card.Controls.Add(new IconChip { Size = new Size(S(52), S(52)), Radius = S(26), Bg = Theme.SURFACE2, Fg = Theme.MUTED, Icon = icon, Location = new Point((width - S(52)) / 2, S(22)) });
+            var t = L(title, Theme.FontHead(12f), Theme.TEXT, S(20), S(86), width - S(40), S(24));
+            t.TextAlign = ContentAlignment.MiddleCenter;
+            var d = L(text, Theme.FontBody(9.5f), Theme.MUTED, S(30), S(112), width - S(60), S(44));
+            d.TextAlign = ContentAlignment.TopCenter;
+            card.Controls.Add(t);
+            card.Controls.Add(d);
+            return card;
+        }
+
+        /// <summary>Grid responsif: jumlah kolom menyesuaikan lebar (HP: 2 kolom, PC: 3–4 kolom).</summary>
+        private Control CreateGrid(int w, int minTile, params Func<int, Control>[] makers)
+        {
+            int gap = S(14);
+            int cols = Math.Max(1, Math.Min(makers.Length, (w + gap) / (S(minTile) + gap)));
+            int tw = (w - gap * (cols - 1)) / cols;
+            var tiles = makers.Select(m => m(tw)).ToList();
+            int rows = (tiles.Count + cols - 1) / cols;
+            var rowH = new int[rows];
+            for (int i = 0; i < tiles.Count; i++) rowH[i / cols] = Math.Max(rowH[i / cols], tiles[i].Height);
+            var grid = new Panel { Width = w, Margin = new Padding(0, S(4), 0, S(6)) };
+            int y = 0;
+            for (int r = 0; r < rows; r++)
+            {
+                for (int c = 0; c < cols && r * cols + c < tiles.Count; c++)
+                {
+                    var t = tiles[r * cols + c];
+                    t.Height = rowH[r];   // satu baris sama tinggi
+                    t.Location = new Point(c * (tw + gap), y);
+                    grid.Controls.Add(t);
+                }
+                y += rowH[r] + gap;
+            }
+            grid.Height = Math.Max(0, y - gap);
+            return grid;
+        }
+
+        private Control CreateTwoColumns(int w, Func<int, Control> left, Func<int, Control> right, int breakAt = 820)
+        {
+            int gap = S(18);
+            bool stacked = w < S(breakAt);
+            int cw = stacked ? w : (w - gap) / 2;
+            var a = left(cw);
+            var b = right(cw);
+            var host = new Panel { Width = w, Margin = new Padding(0, 0, 0, S(6)) };
+            if (stacked)
+            {
+                b.Location = new Point(0, a.Height + gap);
+                host.Height = a.Height + gap + b.Height;
+            }
+            else
+            {
+                b.Location = new Point(cw + gap, 0);
+                host.Height = Math.Max(a.Height, b.Height);
+            }
+            host.Controls.Add(a);
+            host.Controls.Add(b);
+            return host;
+        }
+
+        /// <summary>Chip filter (Android filterChip): pil; terpilih = isi tinta, lainnya = kartu bergaris.</summary>
+        private PillButton CreateChip(string text, bool active, Action onClick)
+        {
+            var btn = (PillButton)Theme.CreateButton(text, active, Theme.INK, S(38));
+            btn.AutoSize = false;
+            btn.Font = Theme.FontLabel(9.5f);
+            btn.Width = TextRenderer.MeasureText(text, btn.Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Width + S(36);
+            if (!active)
+            {
+                btn.BackColor = Theme.SURFACE;
+                btn.ForeColor = Theme.TEXT;
+                btn.FlatAppearance.BorderSize = 1;
+                btn.FlatAppearance.BorderColor = Theme.LINE;
+            }
+            btn.Click += (s, e) => onClick();
+            return btn;
+        }
+
+        private Control ChipRow(int w, params PillButton[] chips)
+        {
+            var row = new Panel { Width = w, Margin = new Padding(0, S(6), 0, S(6)) };
+            int x = 0, y = 0, gap = S(8);
+            foreach (var c in chips)
+            {
+                if (x > 0 && x + c.Width > w) { x = 0; y += c.Height + gap; }
+                c.Location = new Point(x, y);
+                row.Controls.Add(c);
+                x += c.Width + gap;
+            }
+            row.Height = y + (chips.Length > 0 ? chips[0].Height : 0);
+            return row;
+        }
+
+        // ================= BERANDA =================
+        private void BuildHomeTab(FlowLayoutPanel p)
+        {
+            int w = GetContentWidth();
+
+            // ---- Sapaan: tanggal, "Selamat siang," + "mau kerjakan apa?" (persis Android) ----
+            var greet = new Panel { Width = w, Margin = new Padding(0, S(20), 0, S(20)) };
+            var dateLbl = L(DateTime.Now.ToString("dddd, d MMMM", new System.Globalization.CultureInfo("id-ID")), Theme.FontBody(11.5f), Theme.MUTED, 0, 0);
+            var g1 = L(Greeting() + ",", Theme.FontDisplay(30f), Theme.TEXT, -S(3), dateLbl.PreferredHeight + S(6));
+            var g2 = L("mau kerjakan apa?", Theme.FontDisplay(30f), Theme.MUTED, -S(3), g1.Top + g1.PreferredHeight - S(10));
+            greet.Controls.AddRange(new Control[] { dateLbl, g1, g2 });
+            greet.Height = g2.Top + g2.PreferredHeight;
+            p.Controls.Add(greet);
+
+            var recent = GetHistorySnapshot().Where(entry => File.Exists(entry.FilePath)).ToList();
+            int outCount = AppStorage.GetOutFiles().Count;
+
+            // ---- Kartu biru (padanan kartu "Scan dokumen") + 2 ubin angka. PC: berdampingan; sempit: bertumpuk ----
+            int gap = S(16);
+            bool wide = w >= S(900);
+            int statW = wide ? S(290) : (w - gap) / 2;
+            int heroW = wide ? w - statW - gap : w;
+            int heroH = S(236);
+            var top = new Panel { Width = w, Margin = new Padding(0, 0, 0, S(6)) };
+
+            var hero = new CardPanel { Width = heroW, Height = heroH, BackColor = Theme.ACCENT, BorderThickness = 0, CornerRadius = 30, Location = Point.Empty };
+            int artW = heroW >= S(560) ? S(124) : 0;
+            int textW = heroW - S(68) - (artW > 0 ? artW + S(24) : 0);
+            var hTitle = L("Edit PDF seperti di Word", Theme.FontDisplay(21f), Color.White, S(34), S(32), textW, S(40), true);
+            var hSub = L("Ubah teks asli, tambah gambar & tanda tangan, lalu simpan jadi PDF baru. Semua diproses di PC Anda.",
+                Theme.FontBody(11f), Color.FromArgb(217, 255, 255, 255), S(34), S(78), textW, S(54));
+            var btnHero = Theme.CreateButton("Buka Editor", true, Color.White, S(52), S(200));
+            btnHero.ForeColor = Theme.ACCENT;
+            btnHero.Font = Theme.FontLabel(11f);
+            btnHero.Location = new Point(S(34), heroH - S(52) - S(32));
+            btnHero.Click += (s, e) => StartPdfEditorFlow();
+            hero.Controls.AddRange(new Control[] { hTitle, hSub, btnHero });
+            if (artW > 0)
+                hero.Controls.Add(new HeroDocArt { Size = new Size(artW, S(156)), Location = new Point(heroW - artW - S(44), (heroH - S(156)) / 2) });
+            top.Controls.Add(hero);
+
+            Control Stat(int sw, int sh, string number, string label, bool blue, CardIcon icon, Action onClick)
+            {
+                var c = new CardPanel { Width = sw, Height = sh, BackColor = blue ? Theme.ACCENT : Theme.SURFACE, BorderThickness = blue ? 0 : 1, CornerRadius = 28, Cursor = Cursors.Hand };
+                var num = L(number, Theme.FontDisplay(26f), blue ? Color.White : Theme.TEXT, S(26), S(14));
+                var lbl = L(label, Theme.FontBody(11f), blue ? Color.FromArgb(217, 255, 255, 255) : Theme.MUTED, S(28), 0);
+                lbl.Top = Math.Max(num.Top + num.PreferredHeight - S(2), sh - lbl.PreferredHeight - S(20));
+                var ic = new IconChip { Size = new Size(S(46), S(46)), Radius = S(23), Bg = blue ? Theme.Mix(Theme.ACCENT, Color.White, 0.2) : Theme.SOFT, Fg = blue ? Color.White : Theme.TEXT, Icon = icon, Location = new Point(sw - S(46) - S(20), S(20)) };
+                c.Controls.AddRange(new Control[] { num, lbl, ic });
+                void Fire(object? s, EventArgs e) => RunGuarded(onClick);
+                c.Click += Fire;
+                foreach (Control ch in c.Controls) { ch.Click += Fire; ch.Cursor = Cursors.Hand; }
+                return c;
+            }
+            int statH = wide ? (heroH - gap) / 2 : S(132);
+            var st1 = Stat(statW, statH, recent.Count.ToString(), "Berkas terbaru", false, CardIcon.Folder, () => { _docsMode = 0; SelectTab(TAB_DOCS); });
+            var st2 = Stat(statW, statH, outCount.ToString(), "Hasil dibuat", true, CardIcon.Download, () => { _docsMode = 2; _docsCat = "Semua"; SelectTab(TAB_DOCS); });
+            if (wide)
+            {
+                st1.Location = new Point(heroW + gap, 0);
+                st2.Location = new Point(heroW + gap, statH + gap);
+                top.Height = heroH;
+            }
+            else
+            {
+                st1.Location = new Point(0, heroH + gap);
+                st2.Location = new Point(statW + gap, heroH + gap);
+                top.Height = heroH + gap + statH;
+            }
+            top.Controls.Add(st1);
+            top.Controls.Add(st2);
+            p.Controls.Add(top);
+
+            // ---- Buka berkas: ubin putih membulat + label di bawah (persis Android) ----
+            p.Controls.Add(CreateSectionHeader("Buka berkas", "", w));
+            var opens = new (string Label, CardIcon Icon, Color Fg, Action Act)[]
+            {
+                ("PDF", CardIcon.Pdf, Theme.RED, () => PickAndOpenFile("PDF Files (*.pdf)|*.pdf")),
+                ("Word", CardIcon.Word, Theme.SKY, () => PickAndOpenFile("Word (*.docx)|*.docx")),
+                ("Excel", CardIcon.Excel, Theme.TEAL, () => PickAndOpenFile("Excel & CSV (*.xlsx;*.csv)|*.xlsx;*.csv")),
+                ("PowerPoint", CardIcon.ImagePdf, Theme.AMBER, () => PickAndOpenFile("PowerPoint (*.pptx)|*.pptx")),
+                ("Gambar", CardIcon.Image, Theme.INDIGO, () => PickAndOpenFile("Gambar (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp")),
+                ("Lainnya", CardIcon.Folder, Theme.ACCENT, PickAndOpenSupportedFile),
+            };
+            var openRow = new Panel { Width = w, Height = S(132), Margin = new Padding(0, S(4), 0, S(6)) };
+            int tile = S(88), slot = Math.Max(tile + S(18), Math.Min(S(150), w / opens.Length));
+            for (int i = 0; i < opens.Length; i++)
+            {
+                var o = opens[i];
+                int x = i * slot + (slot - tile) / 2;
+                var card = new CardPanel { Size = new Size(tile, tile), CornerRadius = 26, Location = new Point(x, 0), Cursor = Cursors.Hand };
+                card.Controls.Add(new IconChip { Size = new Size(S(40), S(40)), Bg = Theme.SURFACE, Fg = o.Fg, Icon = o.Icon, Location = new Point((tile - S(40)) / 2, (tile - S(40)) / 2), Cursor = Cursors.Hand });
+                var cap = L(o.Label, Theme.FontLabel(10.5f), Theme.TEXT, i * slot, tile + S(12), slot, S(24));
+                cap.TextAlign = ContentAlignment.TopCenter;
+                cap.Cursor = Cursors.Hand;
+                var act = o.Act;
+                void Fire(object? s, EventArgs e) => RunGuarded(act);
+                card.Click += Fire;
+                foreach (Control ch in card.Controls) ch.Click += Fire;
+                cap.Click += Fire;
+                card.AttachHover();
+                openRow.Controls.Add(card);
+                openRow.Controls.Add(cap);
+            }
+            p.Controls.Add(openRow);
+
+            // ---- Buat baru (daftar berkelompok) + Terakhir dibuka: berdampingan di PC ----
+            void OpenWord(string tpl) { using var f = new DocEditorForm(templateKey: tpl); f.ShowDialog(this); RenderCurrentTab(); }
+            void OpenSheet(string tpl) { using var f = new SheetEditorForm(templateKey: tpl); f.ShowDialog(this); RenderCurrentTab(); }
+
+            p.Controls.Add(CreateTwoColumns(w,
+                cw =>
+                {
+                    var col = new Panel { Width = cw };
+                    var hdr = CreateSectionHeader("Buat baru", "Semua template", cw, () => SelectTab(TAB_CREATE));
+                    hdr.Location = new Point(0, S(20));
+                    var list = CreateListCard(cw, new[]
+                    {
+                        Row(CardIcon.Word, Theme.SKY, Theme.SKY_BG, "Dokumen Word", "Halaman kosong, editor ala Word", () => OpenWord(DocEditorForm.TEMPLATE_BLANK)),
+                        Row(CardIcon.Excel, Theme.TEAL, Theme.TEAL_BG, "Spreadsheet Excel", "Tabel dengan rumus seperti Excel", () => OpenSheet(SheetEditorForm.TEMPLATE_BLANK)),
+                        Row(CardIcon.Pdf, Theme.RED, Theme.RED_BG, "PDF dari teks", "Ketik catatan, jadi PDF A4 rapi", QuickTextToPdfDialog),
+                        Row(CardIcon.Signature, Theme.SUCCESS, Theme.SUCCESS_BG, "Tanda tangan PDF", "Goreskan TTD lalu tempel ke PDF", SignExistingPdfFlow),
+                    });
+                    list.Location = new Point(0, hdr.Bottom + S(6));
+                    col.Controls.Add(hdr);
+                    col.Controls.Add(list);
+                    col.Height = list.Bottom;
+                    return col;
+                },
+                cw =>
+                {
+                    var col = new Panel { Width = cw };
+                    var hdr = CreateSectionHeader("Terakhir dibuka", "Lihat semua", cw, () => { _docsMode = 0; SelectTab(TAB_DOCS); });
+                    hdr.Location = new Point(0, S(20));
+                    col.Controls.Add(hdr);
+                    Control body;
+                    if (recent.Count == 0)
+                        body = CreateEmptyState(cw, CardIcon.Folder, "Belum ada berkas", "Buka atau buat dokumen PDF, Word, atau Excel — akan muncul di sini.");
+                    else
+                        body = CreateListCard(cw, recent.Take(4).Select(e => RecentRow(e, false)).ToList());
+                    body.Location = new Point(0, hdr.Bottom + S(6));
+                    col.Controls.Add(body);
+                    col.Height = body.Bottom;
+                    return col;
+                }));
+
+            // ---- Fitur cepat ----
+            p.Controls.Add(CreateSectionHeader("Fitur cepat", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "Baca Lantang", "Bacakan dokumen, offline (ID & EN)", "TTS", Theme.SKY, Theme.SKY_BG, PickAndOpenSupportedFile),
+                tw => CreateFeatureTile(tw, "Cetak", "PDF atau gambar ke printer", "", Theme.ACCENT, Theme.BLUE_BG, QuickPrintFlow),
+                tw => CreateFeatureTile(tw, "QR Code", "Pindai dari gambar atau buat QR", "", Theme.INDIGO, Theme.INDIGO_BG, ShowQrManagerDialog),
+                tw => CreateFeatureTile(tw, "Cari teks dalam file", "Cari kata di isi PDF, Word, Excel & PPTX", "", Theme.ACCENT, Theme.BLUE_BG, GlobalSearchFlow)));
+        }
+
+        /// <summary>Baris berkas riwayat (nama, jenis, ukuran, waktu) + penanda & menu ⋯.</summary>
+        private ListRow RecentRow(DocumentHistoryEntity e, bool withActions)
+        {
+            var (label, fg, bg) = AppStorage.TypeBadgeOf(e.FileType, e.FileName);
+            long size = File.Exists(e.FilePath) ? new FileInfo(e.FilePath).Length : e.SizeBytes;
+            long timestamp = new DateTimeOffset(DateTime.SpecifyKind(e.LastOpenedUtc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+            var row = new ListRow
+            {
+                Icon = IconForFileBadge(label, e.FileName),
+                IconFg = fg,
+                IconBg = bg,
+                Title = e.FileName,
+                Subtitle = $"{label} • {AppStorage.FmtSize(size)} • {AppStorage.RelTime(timestamp)}",
+                Chevron = !withActions
+            };
+            row.Click += (s, ev) => OpenDocument(e.FilePath);
+            if (!withActions) return row;
+
+            row.AccessoryWidth = S(96);
+            var btnStar = Theme.CreateButton(e.IsBookmarked ? "★" : "☆", false, e.IsBookmarked ? Theme.AMBER_FILL : Theme.TEXT, S(36), S(40));
+            btnStar.Padding = Padding.Empty;
+            btnStar.Font = new Font("Segoe UI Symbol", 11f);
+            btnStar.BackColor = e.IsBookmarked ? Theme.AMBER_BG : Theme.SURFACE2;
+            btnStar.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnStar.Click += async (s, ev) =>
+            {
+                try
+                {
+                    await _historyService.SetBookmarkedAsync(e.FilePath, !e.IsBookmarked);
+                    AppStorage.ToggleBookmark(e.FilePath);
+                    RenderCurrentTab();
+                }
+                catch (Exception ex)
+                {
+                    Theme.Toast(this, $"Penanda tidak dapat disimpan: {ex.Message}");
+                }
+            };
+            var btnMore = Theme.CreateButton("⋯", false, Theme.TEXT, S(36), S(40));
+            btnMore.Padding = Padding.Empty;
+            btnMore.Font = new Font("Segoe UI Symbol", 11f, FontStyle.Bold);
+            btnMore.Click += (s, ev) =>
+            {
+                var m = new ContextMenuStrip();
+                m.Items.Add("Buka di Reader", null, (_, _) => OpenDocument(e.FilePath));
+                m.Items.Add("Edit dokumen", null, (_, _) => EditDocument(e.FilePath));
+                m.Items.Add("Salin untuk dibagikan", null, (_, _) => ShareFilePath(e.FilePath));
+                m.Items.Add("Ubah nama", null, (_, _) => ShowRenameDialog(e.FilePath));
+                m.Items.Add("Kunci ke Brankas AES-256", null, (_, _) => LockFileIntoVaultFlow(e.FilePath));
+                m.Items.Add("Tampilkan di Windows Explorer", null, (_, _) =>
+                {
+                    try { Process.Start("explorer.exe", $"/select,\"{e.FilePath}\""); } catch { }
+                });
+                m.Items.Add(new ToolStripSeparator());
+                m.Items.Add("Hapus dari riwayat", null, async (_, _) =>
+                {
+                    try
+                    {
+                        await _historyService.RemoveAsync(e.FilePath);
+                        AppStorage.RemoveRecent(e.FilePath);
+                        RenderCurrentTab();
+                    }
+                    catch (Exception ex)
+                    {
+                        Theme.Toast(this, $"Riwayat tidak dapat dihapus: {ex.Message}");
+                    }
+                });
+                m.Show(btnMore, new Point(0, btnMore.Height));
+            };
+            row.Controls.Add(btnStar);
+            row.Controls.Add(btnMore);
+            void Place()
+            {
+                btnMore.Location = new Point(row.Width - S(14) - btnMore.Width, (row.Height - btnMore.Height) / 2);
+                btnStar.Location = new Point(btnMore.Left - S(8) - btnStar.Width, btnMore.Top);
+            }
+            row.Resize += (s, ev) => Place();
+            Place();
+            return row;
+        }
+
+        // ================= DOKUMEN =================
+        private void BuildDocsTab(FlowLayoutPanel p)
+        {
+            int w = GetContentWidth();
+            p.Controls.Add(CreateHeading(w, "Dokumen", "Berkas yang terakhir dibuka, yang Anda tandai, dan semua hasil olahan Depup Office."));
+
+            var seg = new Segmented { Items = new[] { "Terkini", "Ditandai", "Hasil olahan" }, Width = Math.Min(w, S(460)), Margin = new Padding(0, 0, 0, S(8)) };
+            seg.SelectedIndex = Math.Clamp(_docsMode, 0, 2);
+            seg.SelectedChanged += i => { _docsMode = i; _filterMode = i == 1 ? 1 : 0; RenderCurrentTab(); };
+            p.Controls.Add(seg);
+
+            if (!string.IsNullOrWhiteSpace(_searchQuery))
+            {
+                var info = L($"Hasil pencarian untuk “{_searchQuery}”", Theme.FontBody(10f), Theme.MUTED, 0, 0);
+                info.Margin = new Padding(0, S(6), 0, S(2));
+                p.Controls.Add(info);
+            }
+
+            if (_docsMode == 2)
+            {
+                var all = AppStorage.GetOutFiles();
+                string[] cats = { "Semua", "PDF", "Word", "Excel", "Gambar" };
+                string Key(string c) => c switch { "PDF" => "PDF", "Word" => "DOCX", "Excel" => "XLSX", "Gambar" => "IMG", _ => "" };
+                p.Controls.Add(ChipRow(w, cats.Select(c =>
+                {
+                    int n = c == "Semua" ? all.Count : all.Count(f => AppStorage.TypeBadgeOf(AppStorage.MimeByName(f.Name), f.Name).Label == Key(c));
+                    return CreateChip($"{c} ({n})", _docsCat == c, () => { _docsCat = c; RenderCurrentTab(); });
+                }).ToArray()));
+
+                var files = all
+                    .Where(f => _docsCat == "Semua" || AppStorage.TypeBadgeOf(AppStorage.MimeByName(f.Name), f.Name).Label == Key(_docsCat))
+                    .Where(f => string.IsNullOrWhiteSpace(_searchQuery) || f.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(f => f.LastWriteTimeUtc)
+                    .Take(60)
+                    .ToList();
+                if (files.Count == 0)
+                {
+                    p.Controls.Add(CreateEmptyState(w, CardIcon.Batch, "Belum ada hasil", "Hasil konversi, gabungan, dan dokumen yang Anda simpan akan muncul di sini."));
+                }
+                else
+                {
+                    p.Controls.Add(CreateListCard(w, files.Select(f =>
+                    {
+                        var (label, fg, bg) = AppStorage.TypeBadgeOf(AppStorage.MimeByName(f.Name), f.Name);
+                        var r = new ListRow
+                        {
+                            Icon = IconForFileBadge(label, f.Name), IconFg = fg, IconBg = bg, Title = f.Name,
+                            Subtitle = $"{label} • {AppStorage.FmtSize(f.Length)} • {f.LastWriteTime:dd MMM yyyy, HH:mm}"
+                        };
+                        string path = f.FullName;
+                        r.Click += (s, e) => { if (AppStorage.IsSupportedDocument(path)) OpenDocument(path); else ShareFilePath(path); };
+                        return r;
+                    }).ToList()));
+                }
+                var actions = new Panel { Width = w, Height = S(48), Margin = new Padding(0, S(12), 0, 0) };
+                var bOpen = Theme.CreateButton("Buka folder di Explorer", false, Theme.TEXT, S(42), S(240));
+                bOpen.Click += (s, e) => { try { Process.Start("explorer.exe", $"\"{AppStorage.OutDir}\""); } catch { } };
+                var bManage = Theme.CreateButton("Kelola folder", false, Theme.ACCENT, S(42), S(170));
+                bManage.Location = new Point(bOpen.Right + S(10), 0);
+                bManage.Click += (s, e) => RunGuarded(() => ShowFolderExplorerDialog("SEMUA"));
+                actions.Controls.Add(bOpen);
+                actions.Controls.Add(bManage);
+                p.Controls.Add(actions);
+                return;
+            }
+
+            _recentRowWidth = w;
+            _recentListPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Width = w,
+                Margin = new Padding(0, S(6), 0, 0),
+                Padding = Padding.Empty,
+                BackColor = Theme.BG
+            };
+            FillRecentFilesBox(_recentListPanel, 50, _searchQuery, w);
+            p.Controls.Add(_recentListPanel);
+
+            var pick = Theme.CreateButton("Pilih berkas lain…", false, Theme.ACCENT, S(42), S(200));
+            pick.Margin = new Padding(0, S(12), 0, 0);
+            pick.Click += (s, e) => PickAndOpenSupportedFile();
+            p.Controls.Add(pick);
+        }
+
+        private async void FillRecentFilesBox(FlowLayoutPanel box, int maxCount, string filter, int width)
+        {
+            _recentLoadCts?.Cancel();
+            _recentLoadCts?.Dispose();
+            _recentLoadCts = new CancellationTokenSource();
+            var token = _recentLoadCts.Token;
+            box.SuspendLayout();
+            box.Controls.Clear();
+            box.Controls.Add(L("Memuat riwayat berkas…", Theme.FontBody(10f), Theme.MUTED, 0, 0));
+            box.ResumeLayout();
+
+            try
+            {
+                var all = (await _historyService.GetRecentAsync(cancellationToken: token))
+                    .Where(entry => File.Exists(entry.FilePath))
+                    .ToList();
+                if (token.IsCancellationRequested || box.IsDisposed) return;
+
+                var filtered = all
+                    .Where(entry => string.IsNullOrWhiteSpace(filter) || entry.FileName.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    .Where(entry => _filterMode != 1 || entry.IsBookmarked)
+                    .Take(maxCount)
+                    .ToList();
+
+                box.SuspendLayout();
+                box.Controls.Clear();
+                if (filtered.Count == 0)
+                {
+                    if (_filterMode == 1)
+                        box.Controls.Add(CreateEmptyState(width, CardIcon.Folder, "Belum ada yang ditandai", "Klik ☆ pada salah satu berkas di Terkini untuk menandainya."));
+                    else if (all.Count == 0)
+                        box.Controls.Add(CreateEmptyState(width, CardIcon.Folder, "Belum ada berkas", "Buka atau buat dokumen PDF, Word, atau Excel untuk memulai. Anda juga bisa menyeret berkas ke jendela ini."));
+                    else
+                        box.Controls.Add(CreateEmptyState(width, CardIcon.Search, "Tidak ditemukan", "Tidak ada berkas yang cocok dengan kata kunci pencarian."));
+                }
+                else
+                {
+                    box.Controls.Add(CreateListCard(width, filtered.Select(e => RecentRow(e, true)).ToList()));
+                }
+                box.ResumeLayout();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                if (box.IsDisposed) return;
+                box.SuspendLayout();
+                box.Controls.Clear();
+                box.Controls.Add(L($"Riwayat tidak dapat dimuat: {ex.Message}", Theme.FontBody(10f), Theme.ERROR, 0, 0));
+                box.ResumeLayout();
+            }
+        }
+
+        // ================= BUAT =================
+        private void BuildCreateTab(FlowLayoutPanel p)
+        {
+            int w = GetContentWidth();
+            p.Controls.Add(CreateHeading(w, "Buat", "Dokumen baru, template siap pakai, dan alat bisnis. Semua dibuat di PC Anda."));
+
+            void OpenWord(string tpl) { using var f = new DocEditorForm(templateKey: tpl); f.ShowDialog(this); RenderCurrentTab(); }
+            void OpenSheet(string tpl) { using var f = new SheetEditorForm(templateKey: tpl); f.ShowDialog(this); RenderCurrentTab(); }
+
+            p.Controls.Add(CreateSectionHeader("Dokumen baru", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "Dokumen Word", "Halaman kosong, editor ala Word (A4/Letter/F4)", "", Theme.SKY, Theme.SKY_BG, () => OpenWord(DocEditorForm.TEMPLATE_BLANK)),
+                tw => CreateFeatureTile(tw, "Spreadsheet Excel", "Tabel dengan rumus =SUM, mata uang Rp", "", Theme.TEAL, Theme.TEAL_BG, () => OpenSheet(SheetEditorForm.TEMPLATE_BLANK)),
+                tw => CreateFeatureTile(tw, "PDF dari teks", "Ketik catatan, otomatis jadi PDF A4 rapi", "", Theme.RED, Theme.RED_BG, QuickTextToPdfDialog),
+                tw => CreateFeatureTile(tw, "Edit PDF", "Ubah teks asli, tambah gambar & tanda tangan", "Populer", Theme.ACCENT, Theme.BLUE_BG, StartPdfEditorFlow)));
+
+            p.Controls.Add(CreateSectionHeader("Template", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "Surat Lamaran Kerja", "Template resmi HRD siap edit", "", Theme.SKY, Theme.SKY_BG, () => OpenWord(DocEditorForm.TEMPLATE_SURAT)),
+                tw => CreateFeatureTile(tw, "CV / Resume", "Curriculum Vitae terstruktur", "", Theme.SKY, Theme.SKY_BG, () => OpenWord(DocEditorForm.TEMPLATE_CV)),
+                tw => CreateFeatureTile(tw, "Kuitansi / Invoice", "Nota penjualan dengan total otomatis", "", Theme.TEAL, Theme.TEAL_BG, () => OpenSheet(SheetEditorForm.TEMPLATE_INVOICE)),
+                tw => CreateFeatureTile(tw, "Daftar Hadir", "Rekap kehadiran karyawan / siswa", "", Theme.TEAL, Theme.TEAL_BG, () => OpenSheet(SheetEditorForm.TEMPLATE_PRESENSI))));
+
+            p.Controls.Add(CreateSectionHeader("Surat organisasi & warga", "Karang Taruna • RT/RW • Panitia", w));
+            p.Controls.Add(CreateGrid(w, 240, DocEditorForm.OrgTemplates.Select(t =>
+                (Func<int, Control>)(tw => CreateFeatureTile(tw, t.Title, t.Sub, "", Theme.SKY, Theme.SKY_BG, () => OpenWord(t.Key)))).ToArray()));
+
+            p.Controls.Add(CreateSectionHeader("Usaha & UMKM", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "Nota / Kuitansi Toko", "Nomor otomatis, hitung total, stempel toko", "", Theme.ACCENT, Theme.BLUE_BG, InvoiceFlow),
+                tw => CreateFeatureTile(tw, "Katalog Produk", "Katalog jualan / portofolio dengan foto", "", Theme.INDIGO, Theme.INDIGO_BG, CatalogFlow),
+                tw => CreateFeatureTile(tw, "Jadwal & Agenda", "Perencana tugas siap cetak", "", Theme.TEAL, Theme.TEAL_BG, ScheduleFlow),
+                tw => CreateFeatureTile(tw, "Label Harga & Barcode", "Code 128, EAN-13, QR • lembar A4", "", Theme.ACCENT, Theme.BLUE_BG, PriceTagFlow),
+                tw => CreateFeatureTile(tw, "Pembuat Pasfoto", "2×3, 3×4, 4×6 • latar merah/biru • cetak A4", "", Theme.INDIGO, Theme.INDIGO_BG, IdPhotoFlow),
+                tw => CreateFeatureTile(tw, "Grafik dari Excel", "Batang, lingkaran, garis → PDF laporan", "", Theme.TEAL, Theme.TEAL_BG, ChartFlow)));
+        }
+
+        // ================= ALAT =================
+        private void BuildToolsTab(FlowLayoutPanel p)
+        {
+            int w = GetContentWidth();
+            p.Controls.Add(CreateHeading(w, "Alat", "Pilih alat, lalu pilih berkasnya. Semua diproses di PC Anda — tidak ada yang diunggah."));
+
+            // Jalan pintas: pilih berkas dulu, alat menyesuaikan (atau seret berkas ke jendela ini)
+            void PickFileForQuickProcess()
+            {
+                using var ofd = new OpenFileDialog
+                {
+                    Title = "Pilih Berkas PDF atau Gambar",
+                    Filter = "PDF & Gambar (*.pdf;*.jpg;*.jpeg;*.png)|*.pdf;*.jpg;*.jpeg;*.png"
+                };
+                if (ofd.ShowDialog(this) == DialogResult.OK)
+                    QuickProcessDroppedFiles(new[] { ofd.FileName });
+            }
+            var pickRow = Row(CardIcon.Upload, Theme.ACCENT, Theme.BLUE_BG, "Pilih berkas dulu", "PDF atau foto — lalu pilih tindakannya. Bisa juga seret berkas ke jendela ini.", PickFileForQuickProcess);
+            var pickCard = CreateListCard(w, new[] { pickRow });
+            pickCard.Margin = new Padding(0, 0, 0, S(4));
+            p.Controls.Add(pickCard);
+
+            if (AppStorage.Config.LastJob != null && File.Exists(AppStorage.Config.LastJob.FilePath))
+            {
+                var lj = AppStorage.Config.LastJob;
+                var jr = new ListRow { Icon = CardIcon.Check, IconFg = Theme.SUCCESS, IconBg = Theme.SUCCESS_BG, Title = $"Terakhir: {lj.Title}", Subtitle = lj.FileName, Trailing = "Buka hasil" };
+                jr.Click += (s, e) => OpenDocument(lj.FilePath);
+                var jc = CreateListCard(w, new[] { jr });
+                jc.Margin = new Padding(0, S(12), 0, S(4));
+                p.Controls.Add(jc);
+            }
+
+            p.Controls.Add(CreateSectionHeader("Kelola PDF", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "Gabung PDF", "Satukan beberapa PDF, urutan bebas", "", Theme.RED, Theme.RED_BG, MergePdfFlow),
+                tw => CreateFeatureTile(tw, "Pisah PDF", "Ambil halaman tertentu", "", Theme.RED, Theme.RED_BG, SplitPdfFlow),
+                tw => CreateFeatureTile(tw, "Susun halaman", "Urutkan, putar, atau hapus halaman", "", Theme.RED, Theme.RED_BG, OrganizePdfFlow),
+                tw => CreateFeatureTile(tw, "Nomor Halaman PDF", "Tambahkan Hal X dari Y & Header", "", Theme.RED, Theme.RED_BG, PageNumberFlow),
+                tw => CreateFeatureTile(tw, "Kompres PDF Presisi", "Target < 200 KB / 500 KB / 1 MB", "CPNS", Theme.RED, Theme.RED_BG, CompressPdfFlow),
+                tw => CreateFeatureTile(tw, "Ambil gambar", "Simpan foto di dalam PDF", "", Theme.RED, Theme.RED_BG, ExtractPdfImagesFlow),
+                tw => CreateFeatureTile(tw, "Edit PDF", "Ubah teks, tambah gambar & tanda tangan", "Baru", Theme.RED, Theme.RED_BG, StartPdfEditorFlow),
+                tw => CreateFeatureTile(tw, "Watermark PDF", "RAHASIA / DRAFT diagonal di tiap halaman", "", Theme.RED, Theme.RED_BG, WatermarkPdfFlow),
+                tw => CreateFeatureTile(tw, "Gabung campuran", "PDF & foto jadi satu PDF", "", Theme.RED, Theme.RED_BG, UniversalMergeFlow)));
+
+            p.Controls.Add(CreateSectionHeader("Konversi", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "PDF ke Word", "Ubah PDF ke .docx yang bisa diedit", "Baru", Theme.SKY, Theme.SKY_BG, PdfToWordFlow),
+                tw => CreateFeatureTile(tw, "Gambar ke PDF", "Gabung foto jadi satu PDF", "", Theme.SKY, Theme.SKY_BG, ImagesToSinglePdfFlow),
+                tw => CreateFeatureTile(tw, "Konversi massal", "Banyak foto jadi PDF terpisah", "", Theme.SKY, Theme.SKY_BG, BatchImagesToPdfFlow),
+                tw => CreateFeatureTile(tw, "EXE ke PDF", "Ambil PDF dari berkas .exe (PDF to EXE)", "", Theme.SKY, Theme.SKY_BG, ExeToPdfFlow),
+                tw => CreateFeatureTile(tw, "Slideshow presentasi", "PPTX / PDF layar penuh, laser & timer", "", Theme.SKY, Theme.SKY_BG, SlideshowFlow)));
+
+            p.Controls.Add(CreateSectionHeader("Gambar & foto", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "Watermark foto massal", "Teks/stempel pada banyak foto produk", "", Theme.INDIGO, Theme.INDIGO_BG, BatchWatermarkFlow),
+                tw => CreateFeatureTile(tw, "Pembersih bayangan foto", "Hapus bayangan tangan/HP & putihkan kertas", "", Theme.INDIGO, Theme.INDIGO_BG, ShadowRemoverFlow),
+                tw => CreateFeatureTile(tw, "Pindai kartu nama", "Ekstrak nama, HP & email ke kontak .vcf", "", Theme.INDIGO, Theme.INDIGO_BG, BusinessCardFlow),
+                tw => CreateFeatureTile(tw, "Pindai tabel ke Excel", "Foto tabel/kuitansi jadi berkas .xlsx", "", Theme.TEAL, Theme.TEAL_BG, TableToExcelFlow),
+                tw => CreateFeatureTile(tw, "Kompres foto", "Kecilkan sebelum kirim WA/email", "", Theme.INDIGO, Theme.INDIGO_BG, CompressGalleryImagesFlow),
+                tw => CreateFeatureTile(tw, "TTD transparan", "Foto tanda tangan jadi PNG transparan", "", Theme.INDIGO, Theme.INDIGO_BG, ExtractTransparentSignatureFlow)));
+
+            p.Controls.Add(CreateSectionHeader("Tanda tangan & keamanan", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "Pustaka TTD & Stempel", "Kelola & simpan tanda tangan & stempel", "", Theme.SUCCESS, Theme.SUCCESS_BG, () => Ui.PickStamp(this, manageOnly: true)),
+                tw => CreateFeatureTile(tw, "Tanda tangan PDF", "Goreskan TTD lalu tempel ke halaman", "", Theme.SUCCESS, Theme.SUCCESS_BG, SignExistingPdfFlow),
+                tw => CreateFeatureTile(tw, "Dokumen Terlindungi", "Password, anti-kopi, anti-cetak & sampul DepUp", "Utama", Theme.ACCENT, Theme.BLUE_BG, ProtectedDocFlow),
+                tw => CreateFeatureTile(tw, "Password PDF AES-256", "Kunci PDF tanpa mengubah jadi gambar", "", Theme.ACCENT, Theme.BLUE_BG, PasswordPdfFlow),
+                tw => CreateFeatureTile(tw, "Anti-kopi & anti-cetak", "Bisa dibuka, tapi salin/cetak dikunci", "", Theme.ACCENT, Theme.BLUE_BG, RestrictPdfFlow),
+                tw => CreateFeatureTile(tw, "Kunci berkas", "Enkripsi ke Brankas AES-256", "", Theme.ACCENT, Theme.BLUE_BG, () =>
+                {
+                    using var ofd = new OpenFileDialog { Title = "Pilih Berkas untuk Dienkripsi ke Brankas", Filter = "Semua Berkas (*.*)|*.*" };
+                    if (ofd.ShowDialog(this) == DialogResult.OK) LockFileIntoVaultFlow(ofd.FileName);
+                }),
+                tw => CreateFeatureTile(tw, "Cari teks dalam file", "Cari kata kunci di isi PDF & Word", "", Theme.ACCENT, Theme.BLUE_BG, GlobalSearchFlow),
+                tw => CreateFeatureTile(tw, "QR Code", "Pindai dari gambar atau buat QR", "", Theme.ACCENT, Theme.BLUE_BG, ShowQrManagerDialog)));
+
+            p.Controls.Add(CreateSectionHeader("Baca & bagikan", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "Baca lantang", "Bacakan dokumen, offline (ID & EN)", "", Theme.SKY, Theme.SKY_BG, PickAndOpenSupportedFile),
+                tw => CreateFeatureTile(tw, "Ringkas dokumen", "Poin-poin utama → PDF ringkasan", "", Theme.TEAL, Theme.TEAL_BG, SummarizerFlow),
+                tw => CreateFeatureTile(tw, "Cetak", "Printer atau simpan PDF", "", Theme.ACCENT, Theme.BLUE_BG, QuickPrintFlow),
+                tw => CreateFeatureTile(tw, "Salin untuk dibagikan", "Tempel ke WhatsApp Desktop, email, atau folder", "", Theme.SUCCESS, Theme.SUCCESS_BG, () =>
+                {
+                    using var ofd = new OpenFileDialog { Title = "Pilih Berkas untuk Dibagikan", Filter = "Semua Berkas (*.*)|*.*" };
+                    if (ofd.ShowDialog(this) == DialogResult.OK) ShareFilePath(ofd.FileName);
+                })));
+        }
+
+        // ================= SAYA =================
+        private void BuildMeTab(FlowLayoutPanel p)
+        {
+            int w = GetContentWidth();
+            var vaultFiles = VaultManager.ListEncryptedFiles();
+            var outFiles = AppStorage.GetOutFiles();
+
+            // ---- Kepala: logo + nama + status offline ----
+            var head = new Panel { Width = w, Height = S(96), Margin = new Padding(0, S(20), 0, S(4)) };
+            head.Controls.Add(new LogoTile { Size = new Size(S(64), S(64)), Location = new Point(0, S(12)) });
+            head.Controls.Add(L("Depup Office", Theme.FontDisplay(22f), Theme.TEXT, S(80), S(10)));
+            head.Controls.Add(new Pill { Text = "100% offline · berkas tidak diunggah", Dot = Theme.SUCCESS, Fg = Theme.SUCCESS, Bg = Theme.SUCCESS_BG, Font = Theme.FontLabel(9f), Location = new Point(S(80), S(52)) });
+            p.Controls.Add(head);
+
+            Control Left(int cw)
+            {
+                var col = new Panel { Width = cw };
+                int y = 0;
+                void Add(Control c) { c.Location = new Point(0, y); col.Controls.Add(c); y = c.Bottom; }
+
+                var h1 = CreateSectionHeader("Keamanan", "", cw); Add(h1); y += S(6);
+                Add(CreateListCard(cw, new[]
+                {
+                    Row(CardIcon.Lock, Theme.ACCENT, Theme.BLUE_BG, "Brankas pribadi", $"{vaultFiles.Count} berkas · terkunci PIN, AES-256-GCM", () => { using var vf = new VaultForm(); vf.ShowDialog(this); RenderCurrentTab(); }),
+                    Row(CardIcon.Shield, Theme.SUCCESS, Theme.SUCCESS_BG, "Privasi & tentang aplikasi", "Bagaimana data Anda dijaga", OpenPrivacyPolicyForm),
+                }));
+
+                // Penyimpanan
+                long vaultSize = AppStorage.GetDirectorySize(AppStorage.VaultDir);
+                long outSize = AppStorage.GetDirectorySize(AppStorage.OutDir);
+                var (free, total) = AppStorage.GetDeviceStorage();
+                var h2 = CreateSectionHeader("Penyimpanan", "", cw); Add(h2); y += S(6);
+                var st = new CardPanel { Width = cw, CornerRadius = 22 };
+                st.Controls.Add(L("Dipakai Depup Office", Theme.FontLabel(10.5f), Theme.TEXT, S(20), S(18)));
+                var used = L(AppStorage.FmtSize(vaultSize + outSize), Theme.FontLabel(10.5f), Theme.TEXT, 0, S(18), cw - S(40), S(22));
+                used.Left = S(20); used.TextAlign = ContentAlignment.TopRight;
+                st.Controls.Add(used);
+                st.Controls.Add(new StackedStorageBar
+                {
+                    Location = new Point(S(20), S(52)),
+                    Size = new Size(cw - S(40), S(10)),
+                    TrackColor = Theme.SURFACE2,
+                    Parts = new List<(long, Color)> { (Math.Max(1024, outSize), Theme.ACCENT), (Math.Max(512, vaultSize), Theme.INDIGO) }
+                });
+                int ly = S(76);
+                foreach (var (dot, text, val) in new[]
+                {
+                    (Theme.ACCENT, $"Hasil olahan ({outFiles.Count} berkas)", AppStorage.FmtSize(outSize)),
+                    (Theme.INDIGO, "Brankas", AppStorage.FmtSize(vaultSize)),
+                    (Theme.LINE_STRONG, "Sisa ruang PC", $"{AppStorage.FmtGb(free)} dari {AppStorage.FmtGb(total)}")
+                })
+                {
+                    st.Controls.Add(L("●", Theme.FontBody(9f), dot, S(20), ly));
+                    st.Controls.Add(L(text, Theme.FontBody(9.5f), Theme.TEXT, S(38), ly, cw / 2, S(20), true));
+                    var v = L(val, Theme.FontBody(9.5f), Theme.MUTED, S(20), ly, cw - S(40), S(20));
+                    v.TextAlign = ContentAlignment.TopRight;
+                    st.Controls.Add(v);
+                    ly += S(24);
+                }
+                var bSee = Theme.CreateButton("Lihat hasil olahan", false, Theme.ACCENT, S(42), Math.Min(S(220), cw - S(40)));
+                bSee.Location = new Point(S(20), ly + S(10));
+                bSee.Click += (s, e) => { _docsMode = 2; _docsCat = "Semua"; SelectTab(TAB_DOCS); };
+                st.Controls.Add(bSee);
+                st.Height = bSee.Bottom + S(20);
+                // label kiri ditambahkan sebelum label kanan: urutan z agar teks kiri tidak tertutup
+                foreach (Control c in st.Controls.Cast<Control>().ToList()) if (c is Label lb && lb.TextAlign == ContentAlignment.TopRight) lb.SendToBack();
+                Add(st);
+                col.Height = y;
+                return col;
+            }
+
+            Control Right(int cw)
+            {
+                var col = new Panel { Width = cw };
+                int y = 0;
+                void Add(Control c) { c.Location = new Point(0, y); col.Controls.Add(c); y = c.Bottom; }
+
+                // Tampilan: tema (Ikuti Windows / Terang / Gelap) — sama dengan Android "Ikuti HP / Terang / Gelap"
+                var h1 = CreateSectionHeader("Tampilan", "", cw); Add(h1); y += S(6);
+                var tc = new CardPanel { Width = cw, CornerRadius = 22 };
+                tc.Controls.Add(L("Tema", Theme.FontLabel(10.5f), Theme.TEXT, S(20), S(18)));
+                tc.Controls.Add(L("Mode gelap lebih nyaman di malam hari. \"Ikuti Windows\" mengikuti Pengaturan › Personalisasi › Warna.", Theme.FontBody(9.5f), Theme.MUTED, S(20), S(42), cw - S(40), S(40)));
+                var seg = new Segmented { Items = new[] { "Ikuti Windows", "Terang", "Gelap" }, Location = new Point(S(20), S(88)), Width = cw - S(40) };
+                seg.SelectedIndex = Theme.Mode;
+                seg.SelectedChanged += i => Theme.SetMode(i);
+                tc.Controls.Add(seg);
+                tc.Height = seg.Bottom + S(20);
+                Add(tc);
+
+                var h2 = CreateSectionHeader("Format bawaan", "", cw); Add(h2); y += S(6);
+                Add(CreateListCard(cw, new[]
+                {
+                    Row(CardIcon.Word, Theme.SKY, Theme.SKY_BG, "Dokumen Word", "Ukuran kertas, margin, spasi, huruf", () => { using var f = new DocEditorForm(templateKey: DocEditorForm.TEMPLATE_BLANK); f.ShowDialog(this); }),
+                    Row(CardIcon.Excel, Theme.TEAL, Theme.TEAL_BG, "Spreadsheet Excel", "Garis kisi, mata uang, jumlah otomatis", () => { using var f = new SheetEditorForm(templateKey: SheetEditorForm.TEMPLATE_BLANK); f.ShowDialog(this); }),
+                    Row(CardIcon.Pdf, Theme.RED, Theme.RED_BG, "Pembaca PDF", $"Tema baca: {GetReaderThemeName(AppStorage.Config.PdfReaderTheme)} — klik untuk ganti", CycleDefaultReaderTheme),
+                }));
+
+                var h3 = CreateSectionHeader("Dukungan", "", cw); Add(h3); y += S(6);
+                Add(CreateListCard(cw, new[]
+                {
+                    Row(CardIcon.Heart, Theme.ERROR, Theme.ERROR_BG, "Dukung developer", "Donasi sukarela — semua fitur tetap gratis", ShowDonationDialog),
+                    Row(CardIcon.Mail, Theme.ACCENT, Theme.BLUE_BG, "Kirim masukan", PrivacyManager.DeveloperEmail, PrivacyManager.OpenDeveloperEmail),
+                    Row(CardIcon.Shield, Theme.MUTED, Theme.SURFACE2, "Tentang Depup Office", $"Versi {Theme.AppVersion} · desktop Windows", ShowAboutDialog),
+                }));
+                col.Height = y;
+                return col;
+            }
+
+            p.Controls.Add(CreateTwoColumns(w, Left, Right, 900));
+            var ver = L($"Depup Office Desktop versi {Theme.AppVersion}", Theme.FontBody(9.5f), Theme.MUTED, 0, 0, w, S(24));
+            ver.TextAlign = ContentAlignment.MiddleCenter;
+            ver.Margin = new Padding(0, S(24), 0, 0);
+            p.Controls.Add(ver);
         }
 
         // ================= IKON KARTU (vektor, bukan teks/emoji) =================
@@ -521,370 +1228,6 @@ namespace DepupOfficeDesktop.Forms
             if (ext is ".xlsx" or ".xls" or ".csv") return CardIcon.Excel;
             if (ext is ".png" or ".jpg" or ".jpeg" or ".bmp") return CardIcon.Image;
             return label switch { "PDF" => CardIcon.Pdf, "DOCX" => CardIcon.Word, "XLSX" => CardIcon.Excel, "IMG" => CardIcon.Image, _ => CardIcon.Pdf };
-        }
-
-        /// <summary>Grid responsif: jumlah kolom menyesuaikan lebar, posisi dihitung eksplisit (tanpa FlowLayout AutoSize).</summary>
-        private Control CreateGrid(int w, int minTile, params Func<int, Control>[] makers)
-        {
-            int gap = S(12);
-            int cols = Math.Max(1, Math.Min(makers.Length, (w + gap) / (S(minTile) + gap)));
-            int tw = (w - gap * (cols - 1)) / cols;
-            int rowH = 0;
-            var tiles = new List<Control>();
-            foreach (var make in makers)
-            {
-                var c = make(tw);
-                rowH = Math.Max(rowH, c.Height);
-                tiles.Add(c);
-            }
-            foreach (var t in tiles) t.Height = rowH;
-            int rows = (tiles.Count + cols - 1) / cols;
-            var grid = new Panel { Width = w, Height = rows * rowH + (rows - 1) * gap, Margin = new Padding(0, S(4), 0, S(18)) };
-            for (int i = 0; i < tiles.Count; i++)
-            {
-                tiles[i].Location = new Point((i % cols) * (tw + gap), (i / cols) * (rowH + gap));
-                grid.Controls.Add(tiles[i]);
-            }
-            return grid;
-        }
-
-        private Control CreateTwoColumns(int w, Func<int, Control> left, Func<int, Control> right)
-        {
-            int gap = S(16);
-            bool stacked = w < S(760);
-            int cw = stacked ? w : (w - gap) / 2;
-            var a = left(cw);
-            var b = right(cw);
-            var host = new Panel { Width = w, Margin = new Padding(0, S(4), 0, S(18)) };
-            if (stacked)
-            {
-                b.Location = new Point(0, a.Height + gap);
-                host.Height = a.Height + gap + b.Height;
-            }
-            else
-            {
-                b.Location = new Point(cw + gap, 0);
-                host.Height = Math.Max(a.Height, b.Height);
-            }
-            host.Controls.Add(a);
-            host.Controls.Add(b);
-            return host;
-        }
-
-        private PillButton CreateChip(string text, bool active, Action onClick)
-        {
-            var btn = (PillButton)Theme.CreateButton(text, active, Theme.ACCENT, S(34));
-            btn.AutoSize = false;
-            btn.CornerRadius = 999;
-            btn.Font = Theme.FontLabel(9.5f);
-            btn.Width = TextRenderer.MeasureText(text, btn.Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Width + S(40);
-            if (!active)
-            {
-                btn.BackColor = Theme.SURFACE;
-                btn.ForeColor = Theme.MUTED;
-                btn.FlatAppearance.BorderSize = 1;
-                btn.FlatAppearance.BorderColor = Theme.LINE;
-            }
-            btn.Click += (s, e) => onClick();
-            return btn;
-        }
-
-        // ================= TAB 0: BACA =================
-        private void BuildBacaTab(FlowLayoutPanel p)
-        {
-            int w = GetContentWidth();
-
-            // ---- Sapaan: baris keterangan kecil + "Selamat pagi, mau kerjakan apa?" ----
-            var greet = new Panel { Width = w, Margin = new Padding(0, S(18), 0, S(18)) };
-            string dateText = DateTime.Now.ToString("dddd, d MMMM yyyy", new System.Globalization.CultureInfo("id-ID")).ToUpperInvariant();
-            var dateLbl = L(dateText + "   •   SEMUA DIPROSES DI PC ANDA", Theme.FontMono(8.5f), Theme.ACCENT_LIGHT, 0, 0);
-            var gFont = Theme.FontDisplay(24f);
-            var g1 = L(Greeting() + ",", gFont, Theme.TEXT, -S(2), dateLbl.PreferredHeight + S(6));
-            var g2 = L("mau kerjakan apa?", gFont, Theme.MUTED, 0, 0);
-            if (g1.PreferredWidth + S(10) + g2.PreferredWidth <= w)
-                g2.Location = new Point(g1.Left + g1.PreferredWidth + S(4), g1.Top);
-            else
-                g2.Location = new Point(-S(2), g1.Top + g1.PreferredHeight - S(6));
-            greet.Controls.AddRange(new Control[] { dateLbl, g1, g2 });
-            greet.Height = g2.Top + g2.PreferredHeight;
-            p.Controls.Add(greet);
-
-            var recent = GetHistorySnapshot().Where(entry => File.Exists(entry.FilePath)).ToList();
-            int outCount = AppStorage.GetOutFiles().Count;
-
-            // ---- Kartu hero gradasi + 2 ubin angka. Lebar: berdampingan; sempit: bertumpuk ----
-            int gap = S(14);
-            bool wide = w >= S(860);
-            int statW = wide ? S(260) : (w - gap) / 2;
-            int heroW = wide ? w - statW - gap : w;
-            int heroH = S(214);
-            var top = new Panel { Width = w, Margin = new Padding(0, 0, 0, S(6)) };
-
-            var hero = new CardPanel
-            {
-                Width = heroW, Height = heroH, BorderThickness = 0, CornerRadius = 18, Location = Point.Empty,
-                GradientStart = Theme.BRAND, GradientEnd = Theme.Mix(Theme.ACCENT_DARK, Theme.VIOLET, 0.55)
-            };
-            int artW = heroW >= S(560) ? S(112) : 0;
-            int textW = heroW - S(56) - (artW > 0 ? artW + S(24) : 0);
-            var heroTag = new Pill { Text = "Editor PDF offline", Dot = Theme.CYAN, Fg = Color.White, Bg = Color.FromArgb(40, 255, 255, 255), Outline = Color.FromArgb(70, 255, 255, 255), Font = Theme.FontLabel(8.5f), Location = new Point(S(28), S(24)) };
-            var hTitle = L("Edit PDF seperti di Word", Theme.FontDisplay(20f), Color.White, S(28), S(58), textW, S(38), true);
-            var hSub = L("Ubah teks asli, tambah gambar & tanda tangan, lalu simpan jadi PDF baru. Semua diproses di PC Anda.",
-                Theme.FontBody(10f), Color.FromArgb(225, 255, 255, 255), S(28), S(98), textW, S(44));
-            var btnHero = Theme.CreateButton("Buka Editor  →", true, Color.White, S(42), S(170));
-            btnHero.ForeColor = Theme.ACCENT_DARK;
-            btnHero.Font = Theme.FontLabel(10f);
-            btnHero.Location = new Point(S(28), heroH - S(42) - S(24));
-            btnHero.Click += (s, e) => StartPdfEditorFlow();
-            hero.Controls.AddRange(new Control[] { heroTag, hTitle, hSub, btnHero });
-            if (artW > 0)
-                hero.Controls.Add(new HeroDocArt { Size = new Size(artW, S(140)), Location = new Point(heroW - artW - S(36), (heroH - S(140)) / 2) });
-            top.Controls.Add(hero);
-
-            Control Stat(int sw, int sh, string number, string label, bool blue, CardIcon icon, Action onClick)
-            {
-                var c = new CardPanel { Width = sw, Height = sh, CornerRadius = 16, Cursor = Cursors.Hand };
-                if (blue)
-                {
-                    c.BorderThickness = 0;
-                    c.GradientStart = Theme.Mix(Theme.ACCENT_DARK, Theme.BG, 0.15);
-                    c.GradientEnd = Theme.Mix(Theme.VIOLET, Theme.BG, 0.2);
-                }
-                else c.AccentEdge = Theme.CYAN;
-                var num = L(number, Theme.FontDisplay(24f), blue ? Color.White : Theme.TEXT, S(20), S(12));
-                var lbl = L(label, Theme.FontBody(9.5f), blue ? Color.FromArgb(225, 255, 255, 255) : Theme.MUTED, S(21), 0);
-                lbl.Top = Math.Max(num.Top + num.PreferredHeight - S(4), sh - lbl.PreferredHeight - S(16));
-                var ic = new IconChip { Size = new Size(S(38), S(38)), Radius = S(10), Bg = blue ? Theme.Mix(Theme.ACCENT, Color.White, 0.18) : Theme.SURFACE3, Fg = blue ? Color.White : Theme.ACCENT_LIGHT, Icon = icon, Location = new Point(sw - S(38) - S(16), S(16)) };
-                c.Controls.AddRange(new Control[] { num, lbl, ic });
-                void Fire(object? s, EventArgs e) => RunGuarded(onClick);
-                c.Click += Fire;
-                foreach (Control ch in c.Controls) { ch.Click += Fire; ch.Cursor = Cursors.Hand; }
-                if (!blue) c.AttachHover();
-                return c;
-            }
-            int statH = wide ? (heroH - gap) / 2 : S(116);
-            var st1 = Stat(statW, statH, recent.Count.ToString(), "Berkas terbaru dibuka", false, CardIcon.Folder, () => ShowFolderExplorerDialog("SEMUA"));
-            var st2 = Stat(statW, statH, outCount.ToString(), "Hasil dibuat di folder DepupOffice", true, CardIcon.Batch, () => { try { System.Diagnostics.Process.Start("explorer.exe", $"\"{AppStorage.OutDir}\""); } catch { } });
-            if (wide)
-            {
-                st1.Location = new Point(heroW + gap, 0);
-                st2.Location = new Point(heroW + gap, statH + gap);
-                top.Height = heroH;
-            }
-            else
-            {
-                st1.Location = new Point(0, heroH + gap);
-                st2.Location = new Point(statW + gap, heroH + gap);
-                top.Height = heroH + gap + statH;
-            }
-            top.Controls.Add(st1);
-            top.Controls.Add(st2);
-            p.Controls.Add(top);
-
-            // ---- Buka berkas cepat: ubin kaca (ikon + nama + ekstensi) ----
-            p.Controls.Add(CreateSectionHeader("Buka berkas cepat", "PDF • Office • Gambar", w));
-            var opens = new (string Label, string Ext, CardIcon Icon, Color Fg, Color Bg, Action Act)[]
-            {
-                ("PDF", ".pdf", CardIcon.Pdf, Theme.RED, Theme.RED_BG, () => PickAndOpenFile("PDF Files (*.pdf)|*.pdf")),
-                ("Word", ".docx", CardIcon.Word, Theme.SKY, Theme.SKY_BG, () => PickAndOpenFile("Word (*.docx)|*.docx")),
-                ("Excel", ".xlsx, .csv", CardIcon.Excel, Theme.TEAL, Theme.TEAL_BG, () => PickAndOpenFile("Excel & CSV (*.xlsx;*.csv)|*.xlsx;*.csv")),
-                ("PowerPoint", ".pptx", CardIcon.ImagePdf, Theme.AMBER, Theme.AMBER_BG, () => PickAndOpenFile("PowerPoint (*.pptx)|*.pptx")),
-                ("Gambar", "JPG, PNG, BMP", CardIcon.Image, Theme.INDIGO, Theme.INDIGO_BG, () => PickAndOpenFile("Gambar (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp")),
-                ("Lainnya", "Folder hasil", CardIcon.Folder, Theme.ACCENT_LIGHT, Theme.BLUE_BG, () => ShowFolderExplorerDialog("SEMUA")),
-            };
-            Func<int, Control> OpenTile((string Label, string Ext, CardIcon Icon, Color Fg, Color Bg, Action Act) o) => tw =>
-            {
-                int th = S(112);
-                var card = new CardPanel { Width = tw, Height = th, CornerRadius = 14, Cursor = Cursors.Hand };
-                int cs = S(40);
-                var chip = new IconChip { Size = new Size(cs, cs), Radius = S(10), Bg = o.Bg, Fg = o.Fg, Icon = o.Icon, Location = new Point((tw - cs) / 2, S(16)), Cursor = Cursors.Hand };
-                var cap = L(o.Label, Theme.FontLabel(10f), Theme.TEXT, S(6), S(64), tw - S(12), S(20), true);
-                cap.TextAlign = ContentAlignment.TopCenter;
-                var ext = L(o.Ext, Theme.FontMono(7.5f), Theme.FAINT, S(6), S(85), tw - S(12), S(16), true);
-                ext.TextAlign = ContentAlignment.TopCenter;
-                card.Controls.AddRange(new Control[] { chip, cap, ext });
-                var act = o.Act;
-                void Fire(object? s, EventArgs e) => RunGuarded(act);
-                card.Click += Fire;
-                foreach (Control ch in card.Controls) { ch.Click += Fire; ch.Cursor = Cursors.Hand; }
-                card.AttachHover();
-                return card;
-            };
-            p.Controls.Add(CreateGrid(w, 118, opens.Select(OpenTile).ToArray()));
-
-            // Fitur cepat
-            p.Controls.Add(CreateSectionHeader("Fitur cepat & produktivitas", "Semua modul offline", w));
-            p.Controls.Add(CreateGrid(w, 220,
-                tw => CreateFeatureTile(tw, "Baca Lantang", "Text-to-Speech offline, ID & EN", "TTS", Theme.SKY, Theme.SKY_BG, PickAndOpenSupportedFile),
-                tw => CreateFeatureTile(tw, "Cetak Langsung", "Cetak PDF atau gambar ke printer", "Print", Theme.ACCENT, Theme.BLUE_BG, QuickPrintFlow),
-                tw => CreateFeatureTile(tw, "QR & Barcode", "Pindai, buat, dan stempel ke PDF", "QR", Theme.INDIGO, Theme.INDIGO_BG, ShowQrManagerDialog),
-                tw => CreateFeatureTile(tw, "Pustaka TTD & Stempel", "Simpan tanda tangan & stempel untuk dipakai ulang", "Baru", Theme.ACCENT, Theme.BLUE_BG, () => Ui.PickStamp(this, manageOnly: true))));
-
-            p.Controls.Add(CreateGrid(w, 230,
-                tw => CreateFeatureTile(tw, "Cari Teks di Berkas", "Cari kata di isi PDF, Word, Excel & PPTX", "Cari", Theme.ACCENT, Theme.BLUE_BG, GlobalSearchFlow),
-                tw => CreateFeatureTile(tw, "Ringkas Dokumen", "Poin-poin utama dokumen → PDF ringkasan", "Offline", Theme.TEAL, Theme.TEAL_BG, SummarizerFlow),
-                tw => CreateFeatureTile(tw, "Buka Presentasi PPTX", "Baca slide PowerPoint & mode slideshow", "PPTX", Theme.AMBER, Theme.AMBER_BG, () => PickAndOpenFile("PowerPoint (*.pptx)|*.pptx"))));
-
-            // Filter
-            var chips = new Panel { Width = w, Height = S(46), Margin = new Padding(0, S(4), 0, S(4)) };
-            var chipAll = CreateChip("Semua Terkini", _filterMode == 0, () => { _filterMode = 0; RenderCurrentTab(); });
-            var chipStar = CreateChip("Ditandai (Bookmark)", _filterMode == 1, () => { _filterMode = 1; RenderCurrentTab(); });
-            var chipVault = CreateChip("Brankas Pribadi AES-256", false, () => { using var vf = new VaultForm(); vf.ShowDialog(this); });
-            int cx = 0;
-            foreach (var c in new Control[] { chipAll, chipStar, chipVault })
-            {
-                c.Location = new Point(cx, S(4));
-                cx += c.Width + S(10);
-                chips.Controls.Add(c);
-            }
-            p.Controls.Add(chips);
-
-            // File terakhir dibuka
-            p.Controls.Add(CreateSectionHeader("File Terakhir Dibuka", "Pilih Berkas Lain...", w, PickAndOpenSupportedFile));
-            _recentRowWidth = w;
-            _recentListPanel = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Width = w,
-                Margin = new Padding(0, S(4), 0, 0),
-                Padding = Padding.Empty,
-                BackColor = Theme.BG
-            };
-            FillRecentFilesBox(_recentListPanel, 10, _searchQuery, w);
-            p.Controls.Add(_recentListPanel);
-        }
-
-        private async void FillRecentFilesBox(FlowLayoutPanel box, int maxCount, string filter, int width)
-        {
-            _recentLoadCts?.Cancel();
-            _recentLoadCts?.Dispose();
-            _recentLoadCts = new CancellationTokenSource();
-            var token = _recentLoadCts.Token;
-            box.SuspendLayout();
-            box.Controls.Clear();
-            box.Controls.Add(L("Memuat riwayat berkas...", Theme.FontBody(10f), Theme.MUTED, 0, 0));
-            box.ResumeLayout();
-
-            try
-            {
-                var all = (await _historyService.GetRecentAsync(cancellationToken: token))
-                    .Where(entry => File.Exists(entry.FilePath))
-                    .ToList();
-                if (token.IsCancellationRequested || box.IsDisposed) return;
-
-                var filtered = all
-                    .Where(entry => string.IsNullOrWhiteSpace(filter) || entry.FileName.Contains(filter, StringComparison.OrdinalIgnoreCase))
-                    .Where(entry => _filterMode != 1 || entry.IsBookmarked)
-                    .Take(maxCount)
-                    .ToList();
-
-                box.SuspendLayout();
-                box.Controls.Clear();
-
-                if (filtered.Count == 0)
-                {
-                    string msg = _filterMode == 1
-                        ? "Belum ada file yang ditandai. Klik ikon bintang pada salah satu berkas untuk menandainya."
-                        : (all.Count == 0
-                            ? "Belum ada file terakhir dibuka. Buka atau buat dokumen PDF, Word, atau Excel untuk memulai."
-                            : "Tidak ada berkas yang cocok dengan kata kunci pencarian.");
-                    var empty = new CardPanel { Width = width, Height = S(76), Margin = new Padding(0, 0, 0, S(10)) };
-                    empty.Controls.Add(L(msg, Theme.FontBody(10f), Theme.MUTED, S(20), S(14), width - S(40), S(48), true));
-                    box.Controls.Add(empty);
-                }
-                else
-                {
-                    foreach (var entry in filtered)
-                        box.Controls.Add(BuildRecentFileRow(entry, width));
-                }
-                box.ResumeLayout();
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                if (box.IsDisposed) return;
-                box.SuspendLayout();
-                box.Controls.Clear();
-                box.Controls.Add(L($"Riwayat tidak dapat dimuat: {ex.Message}", Theme.FontBody(10f), Theme.RED, 0, 0));
-                box.ResumeLayout();
-            }
-        }
-
-        private Control BuildRecentFileRow(DocumentHistoryEntity e, int width)
-        {
-            var (label, fg, bg) = AppStorage.TypeBadgeOf(e.FileType, e.FileName);
-            long size = File.Exists(e.FilePath) ? new FileInfo(e.FilePath).Length : e.SizeBytes;
-            long timestamp = new DateTimeOffset(DateTime.SpecifyKind(e.LastOpenedUtc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
-            string meta = $"{AppStorage.FmtSize(size)} • Dibuka {AppStorage.RelTime(timestamp)}";
-
-            var card = new CardPanel { Width = width, Height = S(72), Margin = new Padding(0, 0, 0, S(10)), Cursor = Cursors.Hand };
-
-            var chip = new IconChip { Size = new Size(S(46), S(46)), Radius = S(12), Bg = bg, Fg = fg, Icon = IconForFileBadge(label, e.FileName), Location = new Point(S(16), S(13)) };
-            int textLeft = S(78);
-            int textW = Math.Max(S(80), width - textLeft - S(112));
-            var lblName = L(e.FileName, Theme.FontLabel(10.5f), Theme.TEXT, textLeft, S(13), textW, S(22), true);
-            var lblMeta = L(meta, Theme.FontBody(9f), Theme.MUTED, textLeft, S(38), textW, S(20), true);
-
-            var btnStar = Theme.CreateButton(e.IsBookmarked ? "★" : "☆", e.IsBookmarked, Theme.ACCENT, S(36), S(40));
-            btnStar.Location = new Point(width - S(100), S(18));
-            btnStar.Click += async (s, ev) =>
-            {
-                try
-                {
-                    await _historyService.SetBookmarkedAsync(e.FilePath, !e.IsBookmarked);
-                    AppStorage.ToggleBookmark(e.FilePath);
-                    RenderCurrentTab();
-                }
-                catch (Exception ex)
-                {
-                    Theme.Toast(this, $"Penanda tidak dapat disimpan: {ex.Message}");
-                }
-            };
-
-            var btnMore = Theme.CreateButton("...", false, Theme.TEXT, S(36), S(40));
-            btnMore.BackColor = Theme.SURFACE2;
-            btnMore.FlatAppearance.BorderColor = Theme.LINE;
-            btnMore.Location = new Point(width - S(54), S(18));
-            btnMore.Click += (s, ev) =>
-            {
-                var m = new ContextMenuStrip();
-                m.Items.Add("Buka di Reader", null, (_, _) => OpenDocument(e.FilePath));
-                m.Items.Add("Edit Dokumen", null, (_, _) => EditDocument(e.FilePath));
-                m.Items.Add("Bagikan berkas", null, (_, _) => ShareFilePath(e.FilePath));
-                m.Items.Add("Ubah Nama (Rename)", null, (_, _) => ShowRenameDialog(e.FilePath));
-                m.Items.Add("Enkripsi ke Brankas AES-256", null, (_, _) => LockFileIntoVaultFlow(e.FilePath));
-                m.Items.Add("Tampilkan di Windows Explorer", null, (_, _) =>
-                {
-                    try { Process.Start("explorer.exe", $"/select,\"{e.FilePath}\""); } catch { }
-                });
-                m.Items.Add("Hapus dari Riwayat", null, async (_, _) =>
-                {
-                    try
-                    {
-                        await _historyService.RemoveAsync(e.FilePath);
-                        AppStorage.RemoveRecent(e.FilePath);
-                        RenderCurrentTab();
-                    }
-                    catch (Exception ex)
-                    {
-                        Theme.Toast(this, $"Riwayat tidak dapat dihapus: {ex.Message}");
-                    }
-                });
-                m.Show(btnMore, new Point(0, btnMore.Height));
-            };
-
-            card.Controls.AddRange(new Control[] { chip, lblName, lblMeta, btnStar, btnMore });
-            card.Click += (s, ev) => OpenDocument(e.FilePath);
-            chip.Click += (s, ev) => OpenDocument(e.FilePath);
-            lblName.Click += (s, ev) => OpenDocument(e.FilePath);
-            lblMeta.Click += (s, ev) => OpenDocument(e.FilePath);
-            card.AttachHover();
-            return card;
         }
 
         private void QuickPrintFlow()
@@ -955,129 +1298,6 @@ namespace DepupOfficeDesktop.Forms
             }
         }
 
-        // ================= TAB 1: TOOLS =================
-        private void BuildToolsTab(FlowLayoutPanel p)
-        {
-            int w = GetContentWidth();
-
-            p.Controls.Add(CreateHeading(w, "Tools PDF & konversi", "Alat", "Pilih alat, lalu pilih berkasnya. Semua diproses di PC Anda — tidak ada yang diunggah."));
-
-            // Zona seret & lepas
-            var dz = new CardPanel
-            {
-                Width = w,
-                Height = S(150),
-                BackColor = Theme.Mix(Theme.SURFACE, Theme.ACCENT, 0.05),
-                BorderColor = Theme.BLUE_LINE,
-                BorderThickness = 1,
-                DashedBorder = true,
-                CornerRadius = 18,
-                Cursor = Cursors.Hand,
-                Margin = new Padding(0, S(8), 0, S(16))
-            };
-            var dzIcon = new IconChip { Size = new Size(S(36), S(36)), Radius = S(10), Bg = Theme.BLUE_BG, Fg = Theme.ACCENT_LIGHT, Icon = CardIcon.Batch, Location = new Point((w - S(36)) / 2, S(14)), Cursor = Cursors.Hand };
-            dz.Controls.Add(dzIcon);
-            var dzTitle = L("Pilih atau Tarik Berkas ke Sini", Theme.FontHead(12f), Theme.TEXT, 0, S(54), w, S(24));
-            dzTitle.TextAlign = ContentAlignment.MiddleCenter;
-            var dzSub = L("Klik untuk memilih berkas, atau seret PDF / gambar dari Windows Explorer", Theme.FontBody(9f), Theme.MUTED, 0, S(80), w, S(20));
-            dzSub.TextAlign = ContentAlignment.MiddleCenter;
-            dz.Controls.Add(dzTitle);
-            dz.Controls.Add(dzSub);
-
-            var dzPills = new List<Pill>();
-            foreach (var t in new[] { "PDF", "JPG", "PNG", "Maks 50MB" })
-                dzPills.Add(new Pill { Text = t, Fg = Theme.MUTED, Bg = Theme.SURFACE2, Outline = Theme.LINE, Font = Theme.FontMono(7.5f), Radius = S(6) });
-            int pillGap = S(8);
-            int totalPills = dzPills.Sum(x => x.Width) + pillGap * (dzPills.Count - 1);
-            int px = Math.Max(0, (w - totalPills) / 2);
-            foreach (var pill in dzPills)
-            {
-                pill.Location = new Point(px, S(110));
-                px += pill.Width + pillGap;
-                dz.Controls.Add(pill);
-            }
-
-            void OnDropZoneClick(object? s, EventArgs e) => RunGuarded(PickFileForQuickProcess);
-            void PickFileForQuickProcess()
-            {
-                using var ofd = new OpenFileDialog
-                {
-                    Title = "Pilih Berkas PDF atau Gambar",
-                    Filter = "PDF & Gambar (*.pdf;*.jpg;*.jpeg;*.png)|*.pdf;*.jpg;*.jpeg;*.png"
-                };
-                if (ofd.ShowDialog(this) == DialogResult.OK)
-                    QuickProcessDroppedFiles(new[] { ofd.FileName });
-            }
-            dz.Click += OnDropZoneClick;
-            dzTitle.Click += OnDropZoneClick;
-            dzSub.Click += OnDropZoneClick;
-            dzIcon.Click += OnDropZoneClick;
-            p.Controls.Add(dz);
-
-            // Proses terakhir
-            if (AppStorage.Config.LastJob != null && File.Exists(AppStorage.Config.LastJob.FilePath))
-            {
-                var lj = AppStorage.Config.LastJob;
-                var card = new CardPanel { Width = w, Height = S(96), Margin = new Padding(0, 0, 0, S(18)) };
-                int leftW = Math.Max(S(120), w - S(268));
-                card.Controls.Add(L($"Proses Terakhir: {lj.Title}", Theme.FontBody(9f), Theme.MUTED, S(20), S(14), leftW, S(18), true));
-                card.Controls.Add(L(lj.FileName, Theme.FontHead(11.5f), Theme.TEXT, S(20), S(34), leftW, S(24), true));
-                card.Controls.Add(new StackedStorageBar
-                {
-                    TrackColor = Theme.SURFACE3,
-                    Parts = new List<(long, Color)> { (1, Theme.TEAL) },
-                    Location = new Point(S(20), S(68)),
-                    Size = new Size(leftW, S(8))
-                });
-                var done = L("Selesai 100%", Theme.FontLabel(9.5f), Theme.TEAL, w - S(250), S(36), S(112), S(22));
-                done.TextAlign = ContentAlignment.MiddleRight;
-                card.Controls.Add(done);
-                var open = Theme.CreateButton("Buka Hasil", true, Theme.ACCENT, S(38), S(108));
-                open.Location = new Point(w - S(20) - S(108), S(29));
-                open.Click += (s, e) => OpenDocument(lj.FilePath);
-                card.Controls.Add(open);
-                p.Controls.Add(card);
-            }
-
-            p.Controls.Add(CreateSectionHeader("Peralatan Utama", "12 alat tersedia", w));
-            p.Controls.Add(CreateGrid(w, 230,
-                tw => CreateFeatureTile(tw, "Gabung PDF", "Satukan banyak PDF jadi satu, urutan bebas", "Populer", Theme.INDIGO, Theme.INDIGO_BG, MergePdfFlow),
-                tw => CreateFeatureTile(tw, "Pisah PDF", "Pilah halaman atau pisahkan sesuai rentang", "Rentang", Theme.INDIGO, Theme.INDIGO_BG, SplitPdfFlow),
-                tw => CreateFeatureTile(tw, "Susun & Hapus PDF", "Atur urutan, putar 90°, atau buang halaman", "Baru", Theme.ACCENT, Theme.BLUE_BG, OrganizePdfFlow),
-                tw => CreateFeatureTile(tw, "Sedot Foto PDF", "Ekstrak seluruh gambar halaman PDF ke Documents\\DepupOffice\\Gambar", "JPG", Theme.INDIGO, Theme.INDIGO_BG, ExtractPdfImagesFlow),
-                tw => CreateFeatureTile(tw, "Kompres PDF", "Kompres presisi <200KB, <500KB, <1MB (CPNS)", "Hemat 80%", Theme.TEAL, Theme.TEAL_BG, CompressPdfFlow),
-                tw => CreateFeatureTile(tw, "Edit PDF", "Ubah teks, sisipkan gambar & tanda tangan seperti di Word", "Baru", Theme.ACCENT, Theme.BLUE_BG, StartPdfEditorFlow),
-                tw => CreateFeatureTile(tw, "Konversi Massal", "Ubah banyak foto sekaligus jadi PDF terpisah", "Batch", Theme.INDIGO, Theme.INDIGO_BG, BatchImagesToPdfFlow),
-                tw => CreateFeatureTile(tw, "Kompres Foto", "Kecilkan ukuran foto sebelum dikirim WA/Email", "Hemat", Theme.TEAL, Theme.TEAL_BG, CompressGalleryImagesFlow),
-                tw => CreateFeatureTile(tw, "Pindai & Buat QR", "Pindai QR/Barcode dari gambar atau buat QR ISO", "QR ISO", Theme.TEAL, Theme.TEAL_BG, ShowQrManagerDialog),
-                tw => CreateFeatureTile(tw, "Kunci Password", "Proteksi dokumen rahasia ke Brankas AES-256", "AES-256", Theme.INDIGO, Theme.INDIGO_BG, () =>
-                {
-                    using var ofd = new OpenFileDialog { Title = "Pilih Berkas untuk Dienkripsi ke Brankas", Filter = "Semua Berkas (*.*)|*.*" };
-                    if (ofd.ShowDialog(this) == DialogResult.OK) LockFileIntoVaultFlow(ofd.FileName);
-                }),
-                tw => CreateFeatureTile(tw, "Gambar ke PDF", "Gabungkan banyak foto JPG/PNG menjadi 1 PDF", "Multi-Foto", Theme.ACCENT, Theme.BLUE_BG, ImagesToSinglePdfFlow),
-                tw => CreateFeatureTile(tw, "TTD Transparan", "Hapus latar putih dari foto tanda tangan", "PNG Alpha", Theme.ACCENT, Theme.BLUE_BG, ExtractTransparentSignatureFlow)));
-
-            p.Controls.Add(CreateSectionHeader("Alat PDF Lanjutan", "9 alat • teks PDF tetap asli", w));
-            p.Controls.Add(CreateGrid(w, 230,
-                tw => CreateFeatureTile(tw, "Dokumen Terlindungi", "Sampul DepUp + AES-256-GCM, anti-kopi & anti-cetak, password guru", "Baru", Theme.RED, Theme.RED_BG, ProtectedDocFlow),
-                tw => CreateFeatureTile(tw, "Password PDF AES-256", "Kunci PDF tanpa mengubah halaman jadi gambar", "AES-256", Theme.INDIGO, Theme.INDIGO_BG, PasswordPdfFlow),
-                tw => CreateFeatureTile(tw, "Anti-Kopi & Anti-Cetak", "Buka tanpa password, tapi salin/cetak/ubah dikunci", "Read-Only", Theme.INDIGO, Theme.INDIGO_BG, RestrictPdfFlow),
-                tw => CreateFeatureTile(tw, "Nomor Halaman PDF", "\"Hal X dari Y\", header opsional, lewati sampul", "Baru", Theme.ACCENT, Theme.BLUE_BG, PageNumberFlow),
-                tw => CreateFeatureTile(tw, "Watermark PDF", "RAHASIA / DRAFT diagonal, pola ubin, atau stempel pojok", "Baru", Theme.ACCENT, Theme.BLUE_BG, WatermarkPdfFlow),
-                tw => CreateFeatureTile(tw, "Gabung Campuran", "Campur PDF & foto jadi satu PDF, urutan bebas", "PDF + Foto", Theme.TEAL, Theme.TEAL_BG, UniversalMergeFlow),
-                tw => CreateFeatureTile(tw, "PDF ke Word", "Ubah PDF ke .docx, tata letak tetap", "DOCX", Theme.ACCENT, Theme.BLUE_BG, PdfToWordFlow),
-                tw => CreateFeatureTile(tw, "Slideshow Presentasi", "Peragaan layar penuh PPTX/PDF, laser & timer", "PPTX", Theme.AMBER, Theme.AMBER_BG, SlideshowFlow),
-                tw => CreateFeatureTile(tw, "EXE ke PDF", "Ambil PDF dari program \"PDF to EXE\" (tanpa menjalankannya)", "Pulihkan", Theme.RED, Theme.RED_BG, ExeToPdfFlow)));
-
-            p.Controls.Add(CreateSectionHeader("Pengaturan Format Dokumen", "4 modul", w));
-            p.Controls.Add(CreateGrid(w, 230,
-                tw => CreateFeatureTile(tw, "Pengaturan Word", "Ukuran A4/Letter/F4, margin & spasi", "DOCX", Theme.ACCENT, Theme.BLUE_BG, () => { using var f = new DocEditorForm(templateKey: DocEditorForm.TEMPLATE_BLANK); f.ShowDialog(this); }),
-                tw => CreateFeatureTile(tw, "Pengaturan Excel", "Garis kisi, mata uang Rp/$/€ & rumus", "XLSX", Theme.TEAL, Theme.TEAL_BG, () => { using var f = new SheetEditorForm(templateKey: SheetEditorForm.TEMPLATE_BLANK); f.ShowDialog(this); }),
-                tw => CreateFeatureTile(tw, "Tema Reader PDF", $"Tema aktif: {GetReaderThemeName(AppStorage.Config.PdfReaderTheme)}", "Eye-Care", Theme.RED, Theme.RED_BG, CycleDefaultReaderTheme),
-                tw => CreateFeatureTile(tw, "Brankas Vault", "Kelola berkas terenkripsi AES-256-GCM", "Keamanan", Theme.INDIGO, Theme.INDIGO_BG, () => { using var vf = new VaultForm(); vf.ShowDialog(this); })));
-        }
-
         private static string GetReaderThemeName(int t) => t switch { 1 => "Malam", 2 => "Sepia", 3 => "Eye-Care", _ => "Siang" };
 
         private void CycleDefaultReaderTheme()
@@ -1086,283 +1306,6 @@ namespace DepupOfficeDesktop.Forms
             AppStorage.SaveConfig();
             Theme.Toast(this, $"Tema standar Reader diubah ke: {GetReaderThemeName(AppStorage.Config.PdfReaderTheme)}");
             RenderCurrentTab();
-        }
-
-        // ================= TAB 2: BUAT =================
-        private void BuildBuatTab(FlowLayoutPanel p)
-        {
-            int w = GetContentWidth();
-
-            p.Controls.Add(CreateHeading(w, "Studio kreasi PDF & Office", "Buat Dokumen Baru",
-                "Edit PDF seperti di Word, tulis surat/kontrak, olah tabel rumus di Excel, atau bubuhkan tanda tangan resmi."));
-
-            // Hero editor PDF
-            bool narrow = w < S(780);
-            int btnW = S(270);
-            var hero = new CardPanel
-            {
-                Width = w,
-                Height = narrow ? S(318) : S(206),
-                GradientStart = Theme.BRAND,
-                GradientEnd = Theme.Mix(Theme.ACCENT_DARK, Theme.VIOLET, 0.55),
-                BorderThickness = 0,
-                CornerRadius = 18,
-                Margin = new Padding(0, 0, 0, S(18))
-            };
-            hero.Controls.Add(new Pill
-            {
-                Text = "PALING POPULER • EDITOR PDF OFFLINE",
-                Fg = Color.White,
-                Bg = Color.FromArgb(40, 255, 255, 255),
-                Outline = Color.FromArgb(70, 255, 255, 255),
-                Dot = Theme.CYAN,
-                Font = Theme.FontMono(7.5f),
-                Location = new Point(S(24), S(18))
-            });
-            hero.Controls.Add(L("Edit PDF Seperti di Word", Theme.FontDisplay(19f), Color.White, S(24), S(48), w - S(48), S(36), true));
-
-            int frameW = narrow ? w - S(48) : Math.Min(S(480), w - S(48) - btnW - S(24));
-            hero.Controls.Add(L("Klik teks asli untuk mengubahnya, tambah teks baru, gambar, tanda tangan, sorotan, atau tutup bagian yang ingin dihapus.", Theme.FontBody(9.5f), Color.FromArgb(235, 255, 255, 255), S(24), S(90), Math.Max(S(160), frameW), S(70), true));
-
-            var btnStart = Theme.CreateButton("Buka Editor PDF", true, Color.White, S(44), narrow ? Math.Min(btnW, w - S(48)) : btnW);
-            btnStart.ForeColor = Theme.ACCENT_DARK;
-            btnStart.Click += (s, e) => StartPdfEditorFlow();
-            var btnImport = Theme.CreateButton("Buat PDF dari Teks", false, Color.White, S(42), narrow ? Math.Min(btnW, w - S(48)) : btnW);
-            btnImport.BackColor = Theme.Mix(Theme.BRAND, Color.White, 0.16);
-            btnImport.ForeColor = Color.White;
-            btnImport.FlatAppearance.BorderSize = 1;
-            btnImport.FlatAppearance.BorderColor = Theme.Mix(Theme.BRAND, Color.White, 0.4);
-            btnImport.Click += (s, e) => QuickTextToPdfDialog();
-            if (narrow)
-            {
-                btnStart.Location = new Point(S(24), S(196));
-                btnImport.Location = new Point(S(24), S(252));
-            }
-            else
-            {
-                btnStart.Location = new Point(w - btnW - S(24), S(86));
-                btnImport.Location = new Point(w - btnW - S(24), S(142));
-            }
-            hero.Controls.Add(btnStart);
-            hero.Controls.Add(btnImport);
-            p.Controls.Add(hero);
-
-            void OpenWord(string tpl) { using var f = new DocEditorForm(templateKey: tpl); f.ShowDialog(this); RenderCurrentTab(); }
-            void OpenSheet(string tpl) { using var f = new SheetEditorForm(templateKey: tpl); f.ShowDialog(this); RenderCurrentTab(); }
-
-            p.Controls.Add(CreateSectionHeader("Editor Office & Template Siap Pakai", "6 pilihan", w));
-            p.Controls.Add(CreateGrid(w, 230,
-                tw => CreateFeatureTile(tw, "Buat Word Baru", "Editor .docx interaktif (A4/Letter/F4)", "Word .docx", Theme.ACCENT, Theme.BLUE_BG, () => OpenWord(DocEditorForm.TEMPLATE_BLANK)),
-                tw => CreateFeatureTile(tw, "Buat Excel Baru", "Spreadsheet interaktif & rumus =SUM", "Excel .xlsx", Theme.TEAL, Theme.TEAL_BG, () => OpenSheet(SheetEditorForm.TEMPLATE_BLANK)),
-                tw => CreateFeatureTile(tw, "Surat Lamaran Kerja", "Template resmi HRD siap edit & simpan", "Siap Kerja", Theme.ACCENT, Theme.BLUE_BG, () => OpenWord(DocEditorForm.TEMPLATE_SURAT)),
-                tw => CreateFeatureTile(tw, "CV / Resume", "Template Curriculum Vitae terstruktur", "Karir", Theme.INDIGO, Theme.INDIGO_BG, () => OpenWord(DocEditorForm.TEMPLATE_CV)),
-                tw => CreateFeatureTile(tw, "Kuitansi / Invoice", "Format pembayaran & nota penjualan", "Keuangan", Theme.TEAL, Theme.TEAL_BG, () => OpenSheet(SheetEditorForm.TEMPLATE_INVOICE)),
-                tw => CreateFeatureTile(tw, "Daftar Hadir", "Template rekap kehadiran karyawan", "HR / Admin", Theme.TEAL, Theme.TEAL_BG, () => OpenSheet(SheetEditorForm.TEMPLATE_PRESENSI))));
-
-            // Template organisasi & administrasi warga (DocTemplates.kt Android)
-            p.Controls.Add(CreateSectionHeader("Surat Organisasi & Warga", "Karang Taruna • RT/RW • Panitia", w));
-            p.Controls.Add(CreateGrid(w, 230, DocEditorForm.OrgTemplates.Select(t =>
-                (Func<int, Control>)(tw => CreateFeatureTile(tw, t.Title, t.Sub, "Word", Theme.SKY, Theme.SKY_BG, () => OpenWord(t.Key)))).ToArray()));
-
-            p.Controls.Add(CreateSectionHeader("Generator Bisnis & UMKM", "10 alat", w));
-            p.Controls.Add(CreateGrid(w, 230,
-                tw => CreateFeatureTile(tw, "Nota / Kuitansi Toko", "Nomor otomatis, hitung total, stempel toko", "PDF / Excel", Theme.ACCENT, Theme.BLUE_BG, InvoiceFlow),
-                tw => CreateFeatureTile(tw, "Katalog Produk", "Katalog jualan / portofolio dengan foto", "PDF", Theme.INDIGO, Theme.INDIGO_BG, CatalogFlow),
-                tw => CreateFeatureTile(tw, "Jadwal & Agenda", "Perencana tugas & agenda kerja siap cetak", "PDF / Excel", Theme.TEAL, Theme.TEAL_BG, ScheduleFlow),
-                tw => CreateFeatureTile(tw, "Label Harga & Barcode", "Code 128, EAN-13, QR • lembar A4 21 label", "Toko", Theme.ACCENT, Theme.BLUE_BG, PriceTagFlow),
-                tw => CreateFeatureTile(tw, "Pasfoto Resmi", "2×3, 3×4, 4×6 • latar merah/biru/putih • A4", "Cetak", Theme.RED, Theme.RED_BG, IdPhotoFlow),
-                tw => CreateFeatureTile(tw, "Grafik dari Excel", "Batang, lingkaran, garis → PDF laporan", "Chart", Theme.TEAL, Theme.TEAL_BG, ChartFlow),
-                tw => CreateFeatureTile(tw, "Tabel Foto ke Excel", "Foto tabel → .xlsx yang bisa diedit (OCR)", "XLSX", Theme.TEAL, Theme.TEAL_BG, TableToExcelFlow),
-                tw => CreateFeatureTile(tw, "Kartu Nama ke Kontak", "Foto kartu nama → kontak .vcf (OCR)", "VCF", Theme.INDIGO, Theme.INDIGO_BG, BusinessCardFlow),
-                tw => CreateFeatureTile(tw, "Watermark Foto Massal", "Teks / stempel toko di banyak foto sekaligus", "Batch", Theme.ACCENT, Theme.BLUE_BG, BatchWatermarkFlow),
-                tw => CreateFeatureTile(tw, "Penjernih Bayangan", "Hapus bayangan tangan/HP dari foto dokumen", "Magic", Theme.SKY, Theme.SKY_BG, ShadowRemoverFlow)));
-
-            Control ActionCard(int cw, string title, string desc, string btnText, Color color, Action act)
-            {
-                var card = new CardPanel { Width = cw, Height = S(156), CornerRadius = 14 };
-
-                // Icon chip untuk action card
-                var iconChip = new IconChip { Size = new Size(S(40), S(40)), Radius = S(10), Bg = Theme.Tint(color), Fg = Theme.OnDark(color), Icon = ResolveCardIcon(title), Location = new Point(S(18), S(14)) };
-                card.Controls.Add(iconChip);
-
-                card.Controls.Add(L(title, Theme.FontHead(12f), Theme.TEXT, S(66), S(14), cw - S(84), S(24), true));
-                card.Controls.Add(L(desc, Theme.FontBody(9.5f), Theme.MUTED, S(18), S(46), cw - S(36), S(40), true));
-                var b = Theme.CreateButton(btnText, true, color, S(40), cw - S(36));
-                b.Location = new Point(S(18), S(98));
-                b.Click += (s, e) => act();
-                card.Controls.Add(b);
-                return card;
-            }
-
-            p.Controls.Add(CreateTwoColumns(w,
-                cw => ActionCard(cw, "Tulis Teks Cepat Jadi PDF", "Editor memo cepat, otomatis ditata ke halaman A4 multi-halaman rapi.", "Buat Dokumen Teks ke PDF", Theme.INDIGO, QuickTextToPdfDialog),
-                cw => ActionCard(cw, "Tanda Tangan Digital PDF", "Goreskan tanda tangan dengan mouse/pena lalu tempel ke halaman PDF.", "Pilih PDF & Bubuhkan Tanda Tangan", Theme.TEAL, SignExistingPdfFlow)));
-        }
-
-        // ================= TAB 3: SIMPAN =================
-        private void BuildSimpanTab(FlowLayoutPanel p)
-        {
-            int w = GetContentWidth();
-            var vaultFiles = VaultManager.ListEncryptedFiles();
-            var outFiles = AppStorage.GetOutFiles();
-            Color amber = Theme.AMBER;
-            Color amberLine = Theme.Mix(Theme.SURFACE, Theme.AMBER, 0.35);
-
-            p.Controls.Add(CreateHeading(w, "Offline • berkas tidak pernah diunggah ke cloud", "Brankas & Penyimpanan"));
-
-            // Brankas
-            var vault = new CardPanel
-            {
-                Width = w,
-                Height = S(172),
-                BackColor = Theme.Mix(Theme.SURFACE, Theme.AMBER, 0.05),
-                BorderColor = amberLine,
-                AccentEdge = amber,
-                CornerRadius = 16,
-                Margin = new Padding(0, 0, 0, S(16))
-            };
-            vault.Controls.Add(new IconChip { Size = new Size(S(48), S(48)), Radius = S(12), Bg = Theme.AMBER_BG, Fg = amber, Icon = CardIcon.Vault, Location = new Point(S(24), S(22)) });
-            int vx = S(88);
-            var cnt = new Pill { Text = $"{vaultFiles.Count} berkas terkunci", Fg = amber, Bg = Theme.AMBER_BG, Outline = amberLine, Font = Theme.FontMono(8f) };
-            cnt.Location = new Point(w - S(24) - cnt.Width, S(26));
-            vault.Controls.Add(cnt);
-            vault.Controls.Add(L("Brankas Terenkripsi AES-256", Theme.FontHead(14f), Theme.TEXT, vx, S(22), Math.Max(S(100), cnt.Left - vx - S(12)), S(28), true));
-            vault.Controls.Add(L("Simpan KTP, ijazah, sertifikat & dokumen finansial dengan enkripsi AES-256-GCM + Windows DPAPI. Dikunci dengan PIN pribadi Anda dan 100% tersimpan lokal.",
-                Theme.FontBody(9.5f), Theme.MUTED, vx, S(54), w - vx - S(24), S(48), true));
-            var btnVault = Theme.CreateButton("🔒  Buka Brankas", true, amber, S(40), S(190));
-            btnVault.Location = new Point(vx, S(112));
-            btnVault.Click += (s, e) => { using var vf = new VaultForm(); vf.ShowDialog(this); RenderCurrentTab(); };
-            vault.Controls.Add(btnVault);
-            p.Controls.Add(vault);
-
-            // Dokumen terproteksi
-            p.Controls.Add(CreateSectionHeader("Dokumen Terproteksi", $"{vaultFiles.Count} berkas", w));
-            if (vaultFiles.Count == 0)
-            {
-                var empty = new CardPanel { Width = w, Height = S(72), Margin = new Padding(0, 0, 0, S(16)) };
-                empty.Controls.Add(L("Belum ada berkas di brankas. Gunakan Tools > Kunci Password untuk menambahkan dokumen rahasia.",
-                    Theme.FontBody(10f), Theme.MUTED, S(20), S(14), w - S(40), S(44), true));
-                p.Controls.Add(empty);
-            }
-            else
-            {
-                foreach (var f in vaultFiles.Take(5))
-                {
-                    var row = new CardPanel { Width = w, Height = S(68), Margin = new Padding(0, 0, 0, S(10)) };
-                    row.Controls.Add(new IconChip { Size = new Size(S(44), S(44)), Radius = S(12), Bg = Theme.AMBER_BG, Fg = amber, Icon = CardIcon.Lock, Location = new Point(S(16), S(12)) });
-                    var lock1 = new Pill { Text = "AES-256", Fg = amber, Bg = Theme.AMBER_BG, Outline = amberLine, Font = Theme.FontMono(7.5f), Radius = S(6) };
-                    lock1.Location = new Point(w - S(16) - lock1.Width, (S(68) - lock1.Height) / 2);
-                    int tw = Math.Max(S(80), lock1.Left - S(80) - S(12));
-                    row.Controls.Add(lock1);
-                    row.Controls.Add(L(VaultManager.DisplayName(f), Theme.FontLabel(10.5f), Theme.TEXT, S(76), S(12), tw, S(22), true));
-                    row.Controls.Add(L($"Dienkripsi • {AppStorage.FmtSize(f.Length)}", Theme.FontBody(9f), Theme.MUTED, S(76), S(36), tw, S(20), true));
-                    p.Controls.Add(row);
-                }
-                p.Controls.Add(new Panel { Width = w, Height = S(6) });
-            }
-
-            // Penyimpanan
-            long vaultSize = AppStorage.GetDirectorySize(AppStorage.VaultDir);
-            long outSize = AppStorage.GetDirectorySize(AppStorage.OutDir);
-            var (free, total) = AppStorage.GetDeviceStorage();
-
-            var st = new CardPanel { Width = w, Height = S(128), Margin = new Padding(0, 0, 0, S(16)) };
-            st.Controls.Add(L($"Penyimpanan DepupOffice Terpakai: {AppStorage.FmtSize(vaultSize + outSize)}", Theme.FontHead(12f), Theme.TEXT, S(20), S(16), w - S(40) - S(220), S(26), true));
-            var remain = L($"Tersisa {AppStorage.FmtGb(free)} dari {AppStorage.FmtGb(total)}", Theme.FontBody(9.5f), Theme.MUTED, w - S(20) - S(210), S(19), S(210), S(22));
-            remain.TextAlign = ContentAlignment.MiddleRight;
-            st.Controls.Add(remain);
-            st.Controls.Add(new StackedStorageBar
-            {
-                Location = new Point(S(20), S(54)),
-                Size = new Size(w - S(40), S(10)),
-                TrackColor = Theme.SURFACE3,
-                Parts = new List<(long, Color)> { (Math.Max(1024, outSize), Theme.ACCENT), (Math.Max(512, vaultSize), Theme.INDIGO) }
-            });
-            int lx = S(20);
-            foreach (var (text, col) in new[]
-            {
-                ($"Hasil olahan: {AppStorage.FmtSize(outSize)}", Theme.ACCENT),
-                ($"Brankas: {AppStorage.FmtSize(vaultSize)}", Theme.INDIGO),
-                ($"Sisa disk: {AppStorage.FmtGb(free)}", Theme.MUTED)
-            })
-            {
-                st.Controls.Add(L("●", Theme.FontBody(9f), col, lx, S(82)));
-                lx += S(18);
-                var lbl = L(text, Theme.FontBody(9.5f), Theme.TEXT, lx, S(82));
-                st.Controls.Add(lbl);
-                lx += TextRenderer.MeasureText(text, lbl.Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Width + S(30);
-            }
-            p.Controls.Add(st);
-
-            // Manajer folder (4 kategori sebaris; 2x2 bila sempit)
-            int cgap = S(10);
-            int cw4 = (w - S(40) - cgap * 3) / 4;
-            bool catNarrow = cw4 < S(124);
-            int catCols = catNarrow ? 2 : 4;
-            int catW = (w - S(40) - cgap * (catCols - 1)) / catCols;
-            int catRows = catNarrow ? 2 : 1;
-            int catH = S(44);
-            int catBottom = S(78) + catRows * catH + (catRows - 1) * cgap;
-            bool stackActions = (w - S(40) - cgap) / 2 < S(190);
-            int actH = S(42);
-            int folderH = catBottom + S(14) + (stackActions ? actH * 2 + cgap : actH) + S(20);
-            var folder = new CardPanel { Width = w, Height = folderH, Margin = new Padding(0, 0, 0, S(16)) };
-            folder.Controls.Add(L("Manajer Folder DepupOffice", Theme.FontHead(13f), Theme.TEXT, S(20), S(16), w - S(40), S(26), true));
-            folder.Controls.Add(L($"{AppStorage.OutDir} • {outFiles.Count} berkas tersimpan", Theme.FontBody(9.5f), Theme.MUTED, S(20), S(44), w - S(40), S(22), true));
-
-            int Count(string label) => outFiles.Count(f => AppStorage.TypeBadgeOf(AppStorage.MimeByName(f.Name), f.Name).Label == label);
-            var cats = new (string Name, string Key, Color Fg, Color Bg)[]
-            {
-                ("PDF", "PDF", Theme.RED, Theme.RED_BG),
-                ("Word", "DOCX", Theme.ACCENT, Theme.BLUE_BG),
-                ("Excel", "XLSX", Theme.TEAL, Theme.TEAL_BG),
-                ("Gambar", "IMG", Theme.SKY, Theme.SKY_BG)
-            };
-            for (int i = 0; i < cats.Length; i++)
-            {
-                var c = cats[i];
-                string name = c.Name;
-                var b = Theme.CreateButton($"{name} ({Count(c.Key)})", false, c.Fg, catH, catW);
-                b.BackColor = c.Bg;
-                b.Location = new Point(S(20) + (i % catCols) * (catW + cgap), S(78) + (i / catCols) * (catH + cgap));
-                b.Click += (s, e) => RunGuarded(() => ShowFolderExplorerDialog(name));
-                folder.Controls.Add(b);
-            }
-            int half = stackActions ? w - S(40) : (w - S(40) - cgap) / 2;
-            int actY = catBottom + S(14);
-            var btnAll = Theme.CreateButton("Eksplor Isi Folder", true, Theme.ACCENT, actH, half);
-            btnAll.Location = new Point(S(20), actY);
-            btnAll.Click += (s, e) => RunGuarded(() => ShowFolderExplorerDialog("SEMUA"));
-            var btnWin = Theme.CreateButton("Buka di Windows Explorer", false, Theme.TEXT, actH, half);
-            btnWin.BackColor = Theme.SURFACE2;
-            btnWin.FlatAppearance.BorderColor = Theme.LINE;
-            btnWin.Location = stackActions ? new Point(S(20), actY + actH + cgap) : new Point(S(20) + half + cgap, actY);
-            btnWin.Click += (s, e) => { try { Process.Start("explorer.exe", $"\"{AppStorage.OutDir}\""); } catch { } };
-            folder.Controls.Add(btnAll);
-            folder.Controls.Add(btnWin);
-            p.Controls.Add(folder);
-
-            // Privasi, dukungan & kontak (3 tombol sebaris; menumpuk bila sempit)
-            int bw3 = (w - S(40) - cgap * 2) / 3;
-            bool stackComp = bw3 < S(210);
-            int bh = S(42);
-            int compH = stackComp ? S(106) + bh * 3 + cgap * 2 + S(20) : S(162);
-            var comp = new CardPanel { Width = w, Height = compH, Margin = new Padding(0, 0, 0, S(16)) };
-            comp.Controls.Add(L("Kebijakan Privasi, Dukungan & Kontak Developer", Theme.FontHead(13f), Theme.TEXT, S(20), S(16), w - S(40), S(26), true));
-            comp.Controls.Add(L(PrivacyManager.ComplianceSummaryText, Theme.FontBody(9.5f), Theme.MUTED, S(20), S(46), w - S(40), S(46), true));
-            int bw = stackComp ? w - S(40) : bw3;
-            Point BtnPos(int i) => stackComp ? new Point(S(20), S(106) + i * (bh + cgap)) : new Point(S(20) + i * (bw + cgap), S(106));
-            var b1 = Theme.CreateButton("Privacy Policy", true, Theme.ACCENT, bh, bw);
-            b1.Location = BtnPos(0);
-            b1.Click += (s, e) => RunGuarded(OpenPrivacyPolicyForm);
-            var b2 = Theme.CreateButton("Dukung Developer (Saweria)", true, Theme.RED, bh, bw);
-            b2.Location = BtnPos(1);
-            b2.Click += (s, e) => PrivacyManager.OpenSaweriaDonation();
-            var b3 = Theme.CreateButton("Kontak Developer (Email)", false, Theme.TEAL, bh, bw);
-            b3.Location = BtnPos(2);
-            b3.Click += (s, e) => PrivacyManager.OpenDeveloperEmail();
-            comp.Controls.AddRange(new Control[] { b1, b2, b3 });
-            p.Controls.Add(comp);
         }
     }
 }

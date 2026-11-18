@@ -1,0 +1,3 @@
+Funnel Display — Copyright 2023 The Funnel Project Authors (https://github.com/Dicotype/Funnel)
+Dilisensikan di bawah SIL Open Font License, Version 1.1 — https://openfontlicense.org
+Huruf yang sama dipakai di Depup Office Android (app/src/main/res/font).

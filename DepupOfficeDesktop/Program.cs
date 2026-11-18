@@ -11,7 +11,7 @@ namespace DepupOfficeDesktop
         static void Main(string[] args)
         {
             ApplicationConfiguration.Initialize();
-            Theme.InstallAutoTheme();          // tema gelap "glass" untuk semua jendela & dialog
+            Theme.InstallAutoTheme();          // semua jendela & dialog ikut tema Depup
 
             // Galat tak terduga di satu fitur tidak boleh menutup seluruh aplikasi: tampilkan pesan, lanjutkan.
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
@@ -25,6 +25,7 @@ namespace DepupOfficeDesktop
                 catch { }
             };
             AppStorage.Initialize();
+            Theme.Init();                      // tema terang / gelap (Ikuti Windows bawaan, seperti Android)
             ProtectedDoc.CleanupLeftovers();   // salinan terdekripsi yang tertinggal (aplikasi ditutup paksa)
 
             string? initialFile = null;
