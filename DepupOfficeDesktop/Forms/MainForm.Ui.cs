@@ -92,18 +92,9 @@ namespace DepupOfficeDesktop.Forms
                     _searchTimer.Stop();
                     if (_currentTab != TAB_DOCS) return;
                     _listLimit = InitialListLimit;
-                    _contentHost.AutoScrollPosition = Point.Empty;
+                    _contentHost.ScrollOffset = 0;
                     if (_docsMode == 2) ShowOutputRows();
                     else ShowHistoryRows();
-                };
-                // Latar aurora mengikuti ukuran jendela: gambar ulang kaca setelah selesai mengubah ukuran / maximize.
-                ResizeEnd += (s, e) => { if (Theme.GlassOn) Invalidate(true); };
-                var lastState = WindowState;
-                SizeChanged += (s, e) =>
-                {
-                    if (WindowState == lastState) return;
-                    lastState = WindowState;
-                    if (Theme.GlassOn) Invalidate(true);
                 };
             }
 
@@ -111,9 +102,8 @@ namespace DepupOfficeDesktop.Forms
             _compactNav = WantCompactNav();
             bool compact = _compactNav;
             int sideW = compact ? S(60) : S(208);
-            Color sidebarBack = Theme.GlassOn ? Color.Transparent : Theme.SIDEBAR;
-
-            var sidebar = new GlassPane { Dock = DockStyle.Left, Width = sideW, BackColor = sidebarBack, Surface = Theme.SIDEBAR, EdgeLines = AnchorStyles.Right };
+            var sidebar = new GlassPane(Theme.SIDEBAR, AnchorStyles.Right) { Dock = DockStyle.Left, Width = sideW };
+            Color sidebarBack = sidebar.BackColor;
 
             var brand = new Panel { Dock = DockStyle.Top, Height = compact ? S(61) : S(98), BackColor = sidebarBack };
             var logo = new LogoTile { Size = new Size(S(28), S(28)), Location = new Point(compact ? (sideW - S(28)) / 2 : S(19), S(17)), Cursor = Cursors.Hand };
@@ -146,9 +136,9 @@ namespace DepupOfficeDesktop.Forms
             sidebar.Controls.Add(brand);
 
             // ---------- Area kanan: bilah atas + konten ----------
-            var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.PAGE };
+            var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.BG };
             _rightHost = right;
-            var topBar = new GlassPane { Dock = DockStyle.Top, Height = S(60), BackColor = Theme.GlassOn ? Color.Transparent : Theme.TOOLBAR, Surface = Theme.TOOLBAR, EdgeLines = AnchorStyles.Bottom };
+            var topBar = new GlassPane(Theme.TOOLBAR, AnchorStyles.Bottom) { Dock = DockStyle.Top, Height = S(60) };
 
             _toolbarTitle = L(_tabNames[_currentTab], Theme.FontHead(13f), Theme.TEXT, 0, 0, S(130), S(32), true);
             _toolbarTitle.TextAlign = ContentAlignment.MiddleLeft;
@@ -210,15 +200,12 @@ namespace DepupOfficeDesktop.Forms
             topBar.HandleCreated += (s, e) => _layoutTopBar?.Invoke();
             _layoutTopBar();
 
-            _contentHost = new GlassScrollPanel
+            _contentHost = new WorkspaceViewport
             {
                 Dock = DockStyle.Fill,
-                AutoScroll = true,
                 Padding = compact ? new Padding(S(16), S(8), S(16), S(24)) : new Padding(S(28), S(8), S(28), S(28)),
-                BackColor = Theme.PAGE,
                 AllowDrop = true
             };
-            Theme.DarkScrollbars(_contentHost);
             _contentHost.DragEnter += _dragEnterHandler;
             _contentHost.DragDrop += _dragDropHandler;
             _contentHost.SizeChanged += (s, e) =>
@@ -232,7 +219,7 @@ namespace DepupOfficeDesktop.Forms
             right.Controls.Add(topBar);
 
             // ---------- Status bar khas desktop (seperti MS Word / WPS) ----------
-            var status = new GlassPane { Dock = DockStyle.Bottom, Height = S(28), BackColor = Theme.GlassOn ? Theme.PAGE : Theme.SURFACE, Surface = Theme.SURFACE, EdgeLines = AnchorStyles.Top };
+            var status = new GlassPane(Theme.SURFACE, AnchorStyles.Top) { Dock = DockStyle.Bottom, Height = S(28) };
             Label StatusText(string text, Color color, DockStyle dock)
             {
                 var f = Theme.FontBody(8.5f);
@@ -245,7 +232,7 @@ namespace DepupOfficeDesktop.Forms
                     TextAlign = ContentAlignment.MiddleLeft,
                     Font = Theme.FontBody(8.5f),
                     ForeColor = color,
-                    BackColor = Theme.GlassOn ? Color.Transparent : Theme.SURFACE,
+                    BackColor = status.BackColor,
                     UseMnemonic = false,
                     AutoEllipsis = true,
                     Cursor = Cursors.Default,
@@ -292,23 +279,10 @@ namespace DepupOfficeDesktop.Forms
             Theme.Toast(this, $"Zoom tampilan {Math.Round(Theme.Zoom * 100)}%  •  Ctrl + / Ctrl − / Ctrl 0");
         }
 
-        // ---- IBackdropHost (latar diam untuk sidebar, bilah atas, status bar) ----
-        private readonly GlassBackdrop _formBackdrop = new();
-        GlassBackdrop IBackdropHost.Backdrop => _formBackdrop;
-        Size IBackdropHost.BackdropSize => ClientSize;
-        Point IBackdropHost.DocOffset(Control c) => c == this ? Point.Empty : PointToClient(c.PointToScreen(Point.Empty));
-
-        /// <summary>Latar jendela: aurora lembut (efek kaca aktif) atau warna halaman biasa.</summary>
-        protected override void OnPaintBackground(PaintEventArgs e)
-        {
-            if (Theme.GlassOn) GlassBackdrop.Paint(this, e.Graphics, Rectangle.Intersect(e.ClipRectangle, ClientRectangle), false);
-            else base.OnPaintBackground(e);
-        }
-
         /// <summary>Bangun ulang rangka & halaman (DPI monitor berubah atau tema berganti).</summary>
         private void RebuildShellForDpi()
         {
-            int scroll = -_contentHost.AutoScrollPosition.Y;
+            int scroll = _contentHost.ScrollOffset;
             bool searchFocused = _searchBox.Input.Focused;
             int searchCaret = _searchBox.Input.SelectionStart;
             int searchSelection = _searchBox.Input.SelectionLength;
@@ -330,7 +304,8 @@ namespace DepupOfficeDesktop.Forms
                 }
                 ResumeLayout(true);
                 RenderCurrentTab();
-                _contentHost.AutoScrollPosition = new Point(0, scroll);
+                _contentHost.ScrollOffset = scroll;
+                _contentHost.Visible = viewerHost == null;
                 if (viewerHost != null) _activeViewer?.Focus();
                 else if (searchFocused)
                 {
@@ -351,64 +326,44 @@ namespace DepupOfficeDesktop.Forms
             bool hadViewer = _activeViewer != null;
             CloseEmbeddedViewer();
             if (!force && idx == _currentTab && !hadViewer && idx != TAB_DOCS) return;
-            _tabScroll[_currentTab] = -_contentHost.AutoScrollPosition.Y;
+            _tabScroll[_currentTab] = _contentHost.ScrollOffset;
             bool changed = idx != _currentTab;
             _currentTab = idx;
             _toolbarTitle.Text = _tabNames[idx];
             foreach (var (k, item) in _navItems)
                 item.SetActive(k == _currentTab, animate: changed);
             RenderCurrentTab();
-            _contentHost.AutoScrollPosition = new Point(0, _tabScroll.GetValueOrDefault(_currentTab));
+            _contentHost.ScrollOffset = _tabScroll.GetValueOrDefault(_currentTab);
         }
 
-        private int AvailableWidth()
-        {
-            int sb = _contentHost.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
-            return Math.Max(1, _contentHost.ClientSize.Width + sb - _contentHost.Padding.Horizontal);
-        }
+        private int AvailableWidth() => _contentHost.ContentWidth;
 
         private int GetContentWidth()
         {
-            // Sisakan ruang untuk scrollbar vertikal agar tidak muncul scrollbar horizontal.
-            return Math.Max(1, Math.Min(S(1180), AvailableWidth() - SystemInformation.VerticalScrollBarWidth - S(4)));
+            return Math.Max(1, Math.Min(S(1180), AvailableWidth() - S(4)));
         }
 
         private void RenderCurrentTab(bool preserveScroll = false)
         {
-            int scroll = preserveScroll ? -_contentHost.AutoScrollPosition.Y : 0;
+            int scroll = preserveScroll ? _contentHost.ScrollOffset : 0;
             RenderCurrentTabCore();
-            if (preserveScroll) _contentHost.AutoScrollPosition = new Point(0, scroll);
-            _contentHost.Invalidate(true);
+            if (preserveScroll) _contentHost.ScrollOffset = scroll;
             if (!_reflowOnly && (_currentTab == TAB_HOME || (_currentTab == TAB_DOCS && _docsMode != 2)))
                 _ = RefreshHistoryAsync();
         }
 
         private void RenderCurrentTabCore()
         {
-            _contentHost.SuspendLayout();
-            var old = _contentHost.Controls.Cast<Control>().ToList();
-            _contentHost.Controls.Clear();
-            // Dibuang setelah event saat ini selesai: RenderCurrentTab sering dipanggil dari klik tombol di halaman lama.
-            if (old.Count > 0)
-                BeginInvoke(new Action(() => { foreach (var c in old) c.Dispose(); }));
             _recentListPanel = null;
             _homeRecentPanel = null;
             _outputListPanel = null;
 
-            var page = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(0, 0, 0, S(8)),
-                BackColor = Theme.PAGE,
-                AllowDrop = true
-            };
+            int extra = Math.Max(0, AvailableWidth() - S(4) - GetContentWidth());
+            var page = new WorkspacePage { AllowDrop = true, Padding = new Padding(extra / 2, 0, 0, S(8)) };
             page.DragEnter += _dragEnterHandler;
             page.DragDrop += _dragDropHandler;
 
+            page.SuspendLayout();
             switch (_currentTab)
             {
                 case TAB_HOME: BuildHomeTab(page); break;
@@ -417,14 +372,11 @@ namespace DepupOfficeDesktop.Forms
                 case TAB_TOOLS: BuildToolsTab(page); break;
                 default: BuildMeTab(page); break;
             }
+            page.ResumeLayout(true);
 
-            // Layar lebar: konten (maks. lebar baca) diletakkan di tengah, seperti halaman dokumen
-            int extra = Math.Max(0, AvailableWidth() - SystemInformation.VerticalScrollBarWidth - S(4) - GetContentWidth());
-            page.Padding = new Padding(extra / 2, 0, 0, S(8));
-
-            _contentHost.Controls.Add(page);
             _builtAvailWidth = AvailableWidth();
-            _contentHost.ResumeLayout(true);
+            // Tunggu sampai event klik di halaman lama selesai sebelum membuang kontrolnya.
+            if (_contentHost.SetPage(page) is { } old) BeginInvoke(new Action(old.Dispose));
         }
 
         // ================= KOMPONEN (padanan Ui.kt Android) =================
@@ -712,7 +664,7 @@ namespace DepupOfficeDesktop.Forms
                     {
                         Width = cw, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                         WrapContents = false, FlowDirection = FlowDirection.TopDown, Margin = Padding.Empty,
-                        Location = new Point(0, hdr.Bottom + S(6)), BackColor = Theme.PAGE
+                        Location = new Point(0, hdr.Bottom + S(6)), BackColor = Theme.BG
                     };
                     var recentPanel = _homeRecentPanel;
                     recentPanel.SizeChanged += (s, e) => col.Height = recentPanel.Bottom;
@@ -921,12 +873,12 @@ namespace DepupOfficeDesktop.Forms
         {
             Width = width, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             FlowDirection = FlowDirection.TopDown, WrapContents = false,
-            Margin = new Padding(0, S(6), 0, 0), BackColor = Theme.PAGE
+            Margin = new Padding(0, S(6), 0, 0), BackColor = Theme.BG
         };
 
         private void ReplaceRows(FlowLayoutPanel panel, Control content, int count = 0, Action? showMore = null)
         {
-            int scroll = -_contentHost.AutoScrollPosition.Y;
+            int scroll = _contentHost.ScrollOffset;
             panel.SuspendLayout();
             try
             {
@@ -944,7 +896,7 @@ namespace DepupOfficeDesktop.Forms
             finally
             {
                 panel.ResumeLayout(true);
-                if (scroll > 0) _contentHost.AutoScrollPosition = new Point(0, scroll);
+                if (scroll > 0) _contentHost.ScrollOffset = scroll;
             }
         }
 
@@ -1271,11 +1223,10 @@ namespace DepupOfficeDesktop.Forms
                 seg.SelectedChanged += i => Theme.SetMode(i);
                 tc.Controls.Add(seg);
 
-                // Efek kaca (Android: "Efek kaca (blur)")
                 int gy = seg.Bottom + S(22);
-                tc.Controls.Add(L("Efek kaca (blur)", Theme.FontLabel(10.5f), Theme.TEXT, S(20), gy));
-                tc.Controls.Add(L("Permukaan kaca netral pada sidebar dan toolbar. Pilih Rata untuk permukaan solid.", Theme.FontBody(9.5f), Theme.MUTED, S(20), gy + S(24), cw - S(40), S(40)));
-                var segGlass = new Segmented { Items = new[] { "Kaca blur", "Rata" }, Location = new Point(S(20), gy + S(70)), Width = cw - S(40) };
+                tc.Controls.Add(L("Efek kaca", Theme.FontLabel(10.5f), Theme.TEXT, S(20), gy));
+                tc.Controls.Add(L("Warna lembut pada sidebar dan toolbar, dengan efek Mica pada bilah judul di Windows 11.", Theme.FontBody(9.5f), Theme.MUTED, S(20), gy + S(24), cw - S(40), S(40)));
+                var segGlass = new Segmented { Items = new[] { "Kaca", "Rata" }, Location = new Point(S(20), gy + S(70)), Width = cw - S(40) };
                 segGlass.SelectedIndex = Theme.GlassOn ? 0 : 1;
                 segGlass.SelectedChanged += i => Theme.SetGlass(i == 0);
                 tc.Controls.Add(segGlass);

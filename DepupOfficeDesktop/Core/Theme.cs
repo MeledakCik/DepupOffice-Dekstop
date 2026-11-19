@@ -47,8 +47,7 @@ namespace DepupOfficeDesktop.Core
             return ZoomSteps[Math.Clamp(i + dir, 0, ZoomSteps.Length - 1)];
         }
 
-        // ================= Efek kaca (Android: Saya › Tampilan › "Efek kaca (blur)") =================
-        /// <summary>true = latar aurora + panel kaca buram (blur) di jendela utama.</summary>
+        /// <summary>Gunakan warna kaca di rangka dan Mica pada bilah judul jika didukung Windows.</summary>
         public static bool GlassOn => AppStorage.Config.GlassEffect;
 
         public static void SetGlass(bool on)
@@ -57,9 +56,6 @@ namespace DepupOfficeDesktop.Core
             AppStorage.SaveConfig();
             Changed?.Invoke();
         }
-
-        /// <summary>Latar wadah halaman: transparan saat efek kaca aktif (latar aurora terlihat), selain itu BG.</summary>
-        public static Color PAGE => GlassOn ? Color.Transparent : BG;
 
         public static bool MotionEnabled =>
             !SystemInformation.HighContrast && SystemParametersInfo(0x1042 /* SPI_GETCLIENTAREAANIMATION */, 0, out bool enabled, 0) && enabled;
@@ -511,6 +507,9 @@ namespace DepupOfficeDesktop.Core
         }
 
         private static bool IsDefaultBack(Color c) => c == SystemColors.Control || c == SystemColors.ButtonFace;
+
+        internal static Color BackgroundBehind(Control control) =>
+            control.Parent is { } parent ? EffectiveBack(parent) : BG;
 
         private static Color EffectiveBack(Control c)
         {

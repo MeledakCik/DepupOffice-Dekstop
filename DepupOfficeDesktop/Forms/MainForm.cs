@@ -17,7 +17,7 @@ namespace DepupOfficeDesktop.Forms
     /// Pencarian Berkas, Drag & Drop PDF/Gambar, 12 Alat PDF & Office, Manajer Folder DepupOffice,
     /// Pembuat & Pemindai QR Code, Tanda Tangan Digital, Ekstrak TTD Transparan, dan Donasi QR.
     /// </summary>
-    public partial class MainForm : Form, IGlassHost, IBackdropHost
+    public partial class MainForm : Form
     {
         private readonly string? _initialFilePath;
         private readonly IDocumentHistoryService _historyService;
@@ -34,7 +34,7 @@ namespace DepupOfficeDesktop.Forms
         private string _lastDropKey = "";
         private long _lastDropTick;
 
-        private Panel _contentHost = null!;
+        private WorkspaceViewport _contentHost = null!;
         private readonly Dictionary<int, NavItem> _navItems = new();
         private readonly string[] _tabNames = { "Beranda", "Dokumen", "Buat", "Alat", "Saya" };
 
@@ -144,6 +144,9 @@ namespace DepupOfficeDesktop.Forms
                     else if (e.KeyCode is Keys.OemMinus or Keys.Subtract) { e.SuppressKeyPress = true; ChangeZoom(Theme.NextZoom(-1)); }
                     else if (e.KeyCode is Keys.D0 or Keys.NumPad0) { e.SuppressKeyPress = true; ChangeZoom(1f); }
                 }
+                if (e.Modifiers == Keys.None && _activeViewer == null && !_searchBox.Input.Focused &&
+                    _contentHost.ScrollByKey(e.KeyCode))
+                    e.SuppressKeyPress = true;
             };
 
             Shown += (s, e) =>
@@ -304,6 +307,7 @@ namespace DepupOfficeDesktop.Forms
             host.Controls.Add(viewer);
             _rightHost.Controls.Add(host);
             _rightHost.Controls.SetChildIndex(host, 0); // paling depan: menutupi halaman di belakangnya
+            _contentHost.Hide();
             _viewerHost = host;
             _activeViewer = viewer;
 
@@ -315,6 +319,7 @@ namespace DepupOfficeDesktop.Forms
                 _viewerHost = null;
                 _rightHost.Controls.Remove(host);
                 host.Dispose();
+                if (!Disposing && !IsDisposed) _contentHost.Show();
                 if (_navItems.TryGetValue(_currentTab, out var nav) && !nav.IsDisposed) nav.Focus();
                 tcs.TrySetResult();
             };
@@ -324,6 +329,7 @@ namespace DepupOfficeDesktop.Forms
                 _activeViewer = null;
                 _viewerHost = null;
                 host.Dispose();
+                if (!Disposing && !IsDisposed) _contentHost.Show();
                 throw;
             }
             await tcs.Task;
@@ -359,7 +365,6 @@ namespace DepupOfficeDesktop.Forms
                 _searchTimer.Dispose();
                 _reflowTimer?.Dispose();
                 _navTips.Dispose();
-                _formBackdrop.Dispose();
             }
             base.Dispose(disposing);
         }

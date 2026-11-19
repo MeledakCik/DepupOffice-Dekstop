@@ -35,7 +35,7 @@ namespace DepupOfficeDesktop.Core
         // PdfSettings (Util.kt)
         public float PdfDefaultZoom { get; set; } = 1.0f;
         public float UiZoom { get; set; } = 0.9f;    // zoom antarmuka (Ctrl + / Ctrl − / Ctrl 0)
-        public bool GlassEffect { get; set; } = true; // efek kaca blur di jendela utama
+        public bool GlassEffect { get; set; } = true; // warna kaca pada rangka dan Mica jika didukung
         public int ThemeMode { get; set; } = 0;      // 0 = Ikuti Windows, 1 = Terang, 2 = Gelap (Saya › Tampilan)
         public int PdfReaderTheme { get; set; } = 0; // 0 = Siang, 1 = Malam, 2 = Sepia, 3 = Eye-Care
         public bool PdfSmoothScroll { get; set; } = true;

@@ -8,9 +8,18 @@ using DepupOfficeDesktop.Core;
 
 namespace DepupOfficeDesktop.Controls
 {
+    internal static class ControlBackground
+    {
+        // Rounded controls can fill their corners directly without asking Windows to print a parent window.
+        public static void Paint(Control control, PaintEventArgs e)
+        {
+            using var brush = new SolidBrush(Theme.BackgroundBehind(control));
+            e.Graphics.FillRectangle(brush, e.ClipRectangle);
+        }
+    }
+
     /// <summary>
-    /// Kartu kaca membulat: gradasi kilau halus dari atas, tepi tipis bercahaya, garis sorot di sisi atas,
-    /// border (putus-putus opsional), garis aksen kiri opsional, dan efek hover.
+    /// Kartu membulat dengan opsi gradasi, garis tepi, aksen kiri, dan efek hover.
     /// </summary>
     public class CardPanel : Panel
     {
@@ -94,31 +103,12 @@ namespace DepupOfficeDesktop.Controls
             }
         }
 
-        /// <summary>Kartu kaca: permukaan biasa (SURFACE) di jendela kaca saat efek kaca aktif.</summary>
-        private bool IsGlassCard => !GradientStart.HasValue && BackColor.ToArgb() == Theme.SURFACE.ToArgb() && GlassBackdrop.Active(this);
-
-        protected override void OnPaintBackground(PaintEventArgs e)
-        {
-            // sudut membulat menampilkan apa pun yang ada di belakang kartu
-            Color pb = Parent?.BackColor ?? Theme.BG;
-            if (pb.A < 255 || Parent is GlassPane) ButtonRenderer.DrawParentBackground(e.Graphics, ClientRectangle, this);
-            else
-            {
-                using var b = new SolidBrush(pb);
-                e.Graphics.FillRectangle(b, ClientRectangle);
-            }
-        }
+        protected override void OnPaintBackground(PaintEventArgs e) => ControlBackground.Paint(this, e);
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            if (IsGlassCard)
-            {
-                PaintGlassCard(g);
-                PaintFocus(g);
-                return;
-            }
             int inset = BorderThickness / 2;
             var rect = new Rectangle(inset, inset, Width - 1 - BorderThickness, Height - 1 - BorderThickness);
             if (rect.Width <= 0 || rect.Height <= 0) return;
@@ -167,13 +157,13 @@ namespace DepupOfficeDesktop.Controls
                 g.Clip = oldClip;
             }
 
-            // Gaya Android: kartu rata tanpa garis di atas latar halaman. Garis hanya bila kartu menyatu dengan
-            // latar induknya (mis. di dialog), bila putus-putus / diberi warna khusus, atau saat disorot.
-            bool blends = (Parent?.BackColor ?? Theme.BG).ToArgb() == BackColor.ToArgb();
             bool custom = BorderColor.ToArgb() != Theme.LINE.ToArgb();
-            if (BorderThickness > 0 && (blends || DashedBorder || custom || hot || Theme.Dark && !GradientStart.HasValue))
+            if (BorderThickness > 0 && (!GradientStart.HasValue || DashedBorder || custom || hot))
             {
-                Color border = hot ? Theme.ACCENT : BorderColor;
+                Color border = BorderColor;
+                if (hot) border = Theme.ACCENT;
+                else if (!custom && !DashedBorder && !Theme.Dark && !GradientStart.HasValue)
+                    border = Theme.Mix(BackColor, BorderColor, 0.65);
                 using var pen = new Pen(border, hot ? Math.Max(1.5f, BorderThickness) : BorderThickness);
                 if (DashedBorder && !hot) pen.DashStyle = DashStyle.Dash;
                 g.DrawPath(pen, path);
@@ -199,33 +189,6 @@ namespace DepupOfficeDesktop.Controls
             using var path = Theme.RoundedRect(Rectangle.Inflate(ClientRectangle, -2, -2), Theme.S(CornerRadius));
             using var pen = new Pen(Theme.ACCENT_LIGHT, 2);
             graphics.DrawPath(pen, path);
-        }
-
-        /// <summary>Kartu kaca: latar buram + lapisan putih/gelap semi-transparan + tepi sorot (gaya kaca Android).</summary>
-        private void PaintGlassCard(Graphics g)
-        {
-            var rect = new Rectangle(0, 0, Width - 1, Height - 1);
-            if (rect.Width <= 0 || rect.Height <= 0) return;
-            int radius = Theme.S(CornerRadius);
-            using var path = Theme.RoundedRect(rect, radius);
-            GlassBackdrop.FillGlass(this, g, path, Theme.SURFACE);
-            bool hot = Hoverable && _hover;
-            if (hot)
-                using (var hb = new SolidBrush(Color.FromArgb(Theme.Dark ? 18 : 60, 255, 255, 255))) g.FillPath(hb, path);
-            // tepi: sorot terang di atas, garis halus di sekeliling
-            using (var edge = new Pen(hot ? Theme.ACCENT : GlassBackdrop.Edge, hot ? 1.5f : 1f)) g.DrawPath(edge, path);
-            if (!hot && !Theme.Dark)
-                using (var line = new Pen(Color.FromArgb(40, Theme.LINE_STRONG))) g.DrawPath(line, path);
-            if (DashedBorder)
-                using (var dp = new Pen(BorderColor, Math.Max(1, BorderThickness)) { DashStyle = DashStyle.Dash }) g.DrawPath(dp, path);
-            if (AccentEdge is Color edgeC)
-            {
-                var st = g.Save();
-                g.SetClip(path, CombineMode.Intersect);
-                using var eb = new SolidBrush(edgeC);
-                g.FillRectangle(eb, 0, 0, Theme.S(3), Height);
-                g.Restore(st);
-            }
         }
     }
 
@@ -292,8 +255,7 @@ namespace DepupOfficeDesktop.Controls
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            try { ButtonRenderer.DrawParentBackground(g, ClientRectangle, this); }
-            catch { g.Clear(Parent?.BackColor ?? Theme.BG); }
+            ControlBackground.Paint(this, e);
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
@@ -485,9 +447,7 @@ namespace DepupOfficeDesktop.Controls
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            Color pb = Parent?.BackColor ?? Theme.SURFACE;
-            if (pb.A < 255) ButtonRenderer.DrawParentBackground(g, ClientRectangle, this);
-            else using (var bgBrush = new SolidBrush(pb)) g.FillRectangle(bgBrush, ClientRectangle);
+            ControlBackground.Paint(this, e);
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
             int vGap = Theme.S(3);
@@ -505,7 +465,7 @@ namespace DepupOfficeDesktop.Controls
                 g.DrawLine(accent, body.Left + Theme.S(4), Height / 2f - half, body.Left + Theme.S(4), Height / 2f + half);
             }
             else if (_hover)
-                using (var b = new SolidBrush(pb.A < 255 ? Color.FromArgb(Theme.Dark ? 40 : 110, Theme.Dark ? Color.White : Theme.SURFACE2) : Theme.SURFACE2)) g.FillPath(b, path);
+                using (var b = new SolidBrush(Theme.SURFACE2)) g.FillPath(b, path);
 
             Color fg = _active ? Theme.ACCENT_LIGHT : (Muted ? Inactive : Theme.TEXT);
             int chipSize = Theme.S(20);
@@ -790,8 +750,7 @@ namespace DepupOfficeDesktop.Controls
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            try { ButtonRenderer.DrawParentBackground(g, ClientRectangle, this); }
-            catch { g.Clear(Parent?.BackColor ?? Theme.BG); }
+            ControlBackground.Paint(this, e);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var r = new Rectangle(0, 0, Width - 1, Height - 1);
             using var shape = Theme.RoundedRect(r, Theme.S(8));
