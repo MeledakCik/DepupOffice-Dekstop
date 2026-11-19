@@ -37,11 +37,11 @@ namespace DepupOfficeDesktop.Controls
         public CropCanvasControl()
         {
             DoubleBuffered = true;
-            BackColor = ColorTranslator.FromHtml("#283044");
+            BackColor = Theme.CANVAS;
             Cursor = Cursors.Hand;
         }
 
-        public void SetBitmap(Bitmap baseBmp, int rot, bool flip, RectangleF crop, float skew = 0f)
+        public void SetBitmap(Bitmap baseBmp, int rot, bool flip, RectangleF crop, float skew, int mode, int bright, int contrast)
         {
             _baseShown?.Dispose();
             var oriented = PdfEngine.Orient(baseBmp, rot, flip);
@@ -53,6 +53,11 @@ namespace DepupOfficeDesktop.Controls
                 deskewed.Dispose();
 
             Crop = crop;
+            _filterMode = mode;
+            _bright = bright;
+            _contrast = contrast;
+            _dragMask = 0;
+            _currentRedactRect = null;
             RebuildFilteredPreview();
             FitImageRect();
             Invalidate();
@@ -60,6 +65,7 @@ namespace DepupOfficeDesktop.Controls
 
         public void SetFilter(int mode, int bright, int contrast)
         {
+            if (_filterMode == mode && _bright == bright && _contrast == contrast) return;
             _filterMode = mode;
             _bright = bright;
             _contrast = contrast;
@@ -71,10 +77,30 @@ namespace DepupOfficeDesktop.Controls
         {
             _filteredShown?.Dispose();
             _filteredShown = null;
-            if (_baseShown == null) return;
+            if (_baseShown == null || (_filterMode == 0 && _bright == 0 && _contrast == 0)) return;
             var clone = (Bitmap)_baseShown.Clone();
             var adj = PdfEngine.AdjustBrightnessContrast(clone, _bright, _contrast);
             _filteredShown = PdfEngine.ApplyMode(adj, _filterMode);
+        }
+
+        public void ClearBitmap()
+        {
+            _baseShown?.Dispose();
+            _filteredShown?.Dispose();
+            _baseShown = _filteredShown = null;
+            ActiveRedactions.Clear();
+            _imgRect = RectangleF.Empty;
+            Invalidate();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _baseShown?.Dispose();
+                _filteredShown?.Dispose();
+            }
+            base.Dispose(disposing);
         }
 
         protected override void OnSizeChanged(EventArgs e)

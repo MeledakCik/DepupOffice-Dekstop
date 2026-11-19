@@ -146,7 +146,16 @@ namespace DepupOfficeDesktop.Forms
             };
             AppStorage.AddRecent(path);
             try { await _historyService.RecordOpenedAsync(path); } catch { }
-            await ShowViewerEmbeddedAsync(tmp, opt);
+            try
+            {
+                if (IsDisposed || Disposing) opt.OnClosed();
+                else await ShowViewerEmbeddedAsync(tmp, opt);
+            }
+            catch
+            {
+                opt.OnClosed();
+                throw;
+            }
             return true;
         }
 

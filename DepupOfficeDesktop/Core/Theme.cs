@@ -2,19 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace DepupOfficeDesktop.Core
 {
     /// <summary>
-    /// Palet Depup Office Desktop v4.2 — sama persis dengan token Android (Ui.kt, object C):
-    /// minimalis netral-hangat. Halaman abu batu, kartu rata tanpa gradasi, satu aksen biru royal,
-    /// warna jenis berkas (PDF terakota, Word biru batu, Excel hijau sage, Gambar lavender) dipakai kecil-kecil.
-    /// Tema TERANG & GELAP: ikut Windows atau dipilih di Saya › Tampilan. Semua token dihitung ulang saat tema berganti.
-    /// Kertas dokumen (Word/PDF/Excel/cetak) selalu putih: konstanta PAPER_* / SHEET_*.
+    /// Palet ruang kerja desktop, dengan sidebar dan toolbar bernuansa netral serta warna khusus jenis berkas.
+    /// Permukaan kertas dokumen dan warna cetak memakai token PAPER_* / SHEET_*.
     /// </summary>
     public static class Theme
     {
@@ -66,6 +61,13 @@ namespace DepupOfficeDesktop.Core
         /// <summary>Latar wadah halaman: transparan saat efek kaca aktif (latar aurora terlihat), selain itu BG.</summary>
         public static Color PAGE => GlassOn ? Color.Transparent : BG;
 
+        public static bool MotionEnabled =>
+            !SystemInformation.HighContrast && SystemParametersInfo(0x1042 /* SPI_GETCLIENTAREAANIMATION */, 0, out bool enabled, 0) && enabled;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SystemParametersInfo(uint action, uint parameter, [MarshalAs(UnmanagedType.Bool)] out bool value, uint flags);
+
         /// <summary>Ubah ukuran piksel desain (96 DPI) menjadi piksel nyata layar saat ini.</summary>
         public static int S(int px) => (int)Math.Round(px * Scale);
 
@@ -105,10 +107,11 @@ namespace DepupOfficeDesktop.Core
 
         public static void SetMode(int mode)
         {
-            AppStorage.Config.ThemeMode = Math.Clamp(mode, 0, 2);
+            int next = Math.Clamp(mode, 0, 2);
+            if (next == Mode) return;
+            AppStorage.Config.ThemeMode = next;
             AppStorage.SaveConfig();
             bool d = ResolveDark(Mode);
-            if (d == Dark) return;
             Dark = d;
             Changed?.Invoke();
         }
@@ -128,36 +131,37 @@ namespace DepupOfficeDesktop.Core
         private static Color T(string light, string dark) => H(Dark ? dark : light);
 
         // ---------- Permukaan (Android: BG, SURFACE, SURFACE2, SURFACE3, SOFT, LINE) ----------
-        public static Color BG => T("#F1F0EC", "#0F0F0E");           // latar halaman
-        public static Color SIDEBAR => BG;                            // navigasi menyatu dengan halaman (seperti bilah Android)
-        public static Color SURFACE => T("#FFFFFF", "#1B1B1A");      // kartu, sel, dialog, navigasi
+        public static Color BG => T("#F6F7F9", "#191B20");
+        public static Color SIDEBAR => T("#E9EDF3", "#23262D");
+        public static Color TOOLBAR => T("#F2F4F8", "#21242B");
+        public static Color SURFACE => T("#FFFFFF", "#272A32");
         public static Color SURFACE_HI => SURFACE;
-        public static Color SURFACE2 => T("#E8E6E1", "#272725");     // isian, chip, trek segmen
-        public static Color SURFACE3 => T("#DCD9D3", "#34342F");     // ditekan / terpilih netral
-        public static Color SOFT => T("#F3F2EE", "#242422");         // wadah ikon di dalam kartu
-        public static Color FIELD => T("#FFFFFF", "#1B1B1A");        // kotak isian
-        public static Color LINE => T("#E4E2DD", "#2C2C29");         // pemisah & garis tepi tipis
-        public static Color LINE_STRONG => T("#84817B", "#6F6D68");  // batas kontrol (>= 3:1)
+        public static Color SURFACE2 => T("#E8ECF2", "#313540");
+        public static Color SURFACE3 => T("#DCE3EC", "#3C424F");
+        public static Color SOFT => T("#F1F4F8", "#2B2F38");
+        public static Color FIELD => SURFACE;
+        public static Color LINE => T("#D8DEE8", "#373D48");
+        public static Color LINE_STRONG => T("#758298", "#8490A2");
         /// <summary>Kanvas di sekeliling halaman dokumen (Android: TRACK/CANVAS = SURFACE3).</summary>
-        public static Color CANVAS => T("#DCD9D3", "#141413");
+        public static Color CANVAS => T("#E4E8EE", "#1A1D24");
 
         // ---------- Aksen biru royal (Android BLUE_ACCENT / PRIMARY) ----------
-        public static Color ACCENT => T("#1652F6", "#1D56FF");
-        public static Color ACCENT_DARK => T("#0F43D4", "#1D56FF");
-        public static Color ACCENT_LIGHT => T("#1652F6", "#7E9BFF");  // aksen sebagai teks di atas permukaan
+        public static Color ACCENT => T("#0066C6", "#1670CE");
+        public static Color ACCENT_DARK => T("#0757AA", "#125FAB");
+        public static Color ACCENT_LIGHT => T("#075AAC", "#82BBFF");
         public static Color BRAND => H("#0037FF");                     // ubin logo (sama dengan ikon aplikasi)
         public static Color VIOLET => T("#72539E", "#C2A9E6");
-        public static Color BLUE_BG => T("#E8EEFF", "#19254D");       // PRIMARY_C: wadah lembut biru
-        public static Color BLUE_LINE => T("#C9D6FF", "#2B3A73");
+        public static Color BLUE_BG => T("#E1EFFD", "#233A57");
+        public static Color BLUE_LINE => T("#BCD5F3", "#365677");
         public static Color CYAN => ACCENT;
 
         // ---------- Tinta: aksi utama & panel kontras (Android INK / ON_INK) ----------
-        public static Color INK => T("#111111", "#F2F1EE");
-        public static Color ON_INK => T("#FFFFFF", "#111111");
+        public static Color INK => T("#1C2430", "#F1F4FA");
+        public static Color ON_INK => T("#FFFFFF", "#1C2430");
 
         // ---------- Teks ----------
-        public static Color TEXT => T("#111111", "#F2F1EE");
-        public static Color MUTED => T("#65625D", "#9C9A95");
+        public static Color TEXT => T("#202736", "#F0F3F8");
+        public static Color MUTED => T("#556175", "#ABB6C6");
         public static Color FAINT => LINE_STRONG;
 
         // ---------- Jenis berkas & status (Android PDF_FG/BG, DOC, XLS, IMG, SUCCESS, WARN, ERROR) ----------
@@ -222,39 +226,7 @@ namespace DepupOfficeDesktop.Core
         // ================= Huruf =================
 
         // Huruf: sama dengan Android (Funnel Display, dibawa di folder Fonts). Bila gagal dimuat → Segoe UI Variable / Segoe UI.
-        private static System.Drawing.Text.PrivateFontCollection? _pfc;
-        private static FontFamily? _famRegular, _famMedium, _famSemi;
-        private static bool _fontsTried;
-
-        private static void LoadFonts()
-        {
-            if (_fontsTried) return;
-            _fontsTried = true;
-            try
-            {
-                string dir = Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts");
-                var map = new[] { ("funnel_display_regular.ttf", "Funnel Display"), ("funnel_display_medium.ttf", "Funnel Display Medium"), ("funnel_display_semibold.ttf", "Funnel Display SemiBold") };
-                var pfc = new System.Drawing.Text.PrivateFontCollection();
-                foreach (var (file, _) in map)
-                {
-                    string path = Path.Combine(dir, file);
-                    if (!File.Exists(path)) return;
-                    AddFontResourceEx(path, FR_PRIVATE, IntPtr.Zero);   // agar GDI (TextRenderer / Label) mengenalnya
-                    pfc.AddFontFile(path);                              // agar GDI+ (Font) mengenalnya
-                }
-                FontFamily? Find(string name) => pfc.Families.FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
-                _famRegular = Find(map[0].Item2);
-                _famMedium = Find(map[1].Item2) ?? _famRegular;
-                _famSemi = Find(map[2].Item2) ?? _famMedium;
-                _pfc = pfc;
-            }
-            catch
-            {
-                _famRegular = _famMedium = _famSemi = null;
-            }
-        }
-
-        private static readonly bool HasVariable = FontExists("Segoe UI Variable Display");
+        private static readonly bool HasVariable = FontExists("Segoe UI Variable Text");
         private static bool FontExists(string name)
         {
             try { using var f = new Font(name, 10f); return string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase); }
@@ -267,20 +239,14 @@ namespace DepupOfficeDesktop.Core
         private static readonly Dictionary<(string, int, FontStyle), Font> FontCache = new();
         private static readonly object FontGate = new();
 
-        private static Font Make(FontFamily? fam, string fallback, float sizePt, FontStyle style)
+        private static Font Make(string family, float sizePt, FontStyle style)
         {
-            LoadFonts();
             sizePt = Math.Max(6f, sizePt * Zoom);   // huruf ikut zoom tampilan
-            var key = (fam?.Name ?? fallback, (int)Math.Round(sizePt * 100), style);
+            var key = (family, (int)Math.Round(sizePt * 100), style);
             lock (FontGate)
             {
                 if (FontCache.TryGetValue(key, out var cached)) return cached;
-                Font? f = null;
-                if (fam != null)
-                {
-                    try { f = new Font(fam, sizePt, style, GraphicsUnit.Point); } catch { }
-                }
-                f ??= new Font(fallback, sizePt, style, GraphicsUnit.Point);
+                var f = new Font(family, sizePt, style, GraphicsUnit.Point);
                 FontCache[key] = f;
                 return f;
             }
@@ -288,30 +254,25 @@ namespace DepupOfficeDesktop.Core
 
         private static string? _monoName;
 
-        private static string HeadFallback => HasVariable ? "Segoe UI Variable Display Semib" : "Segoe UI Semibold";
-        private static string LabelFallback => HasVariable ? "Segoe UI Variable Text Semibold" : "Segoe UI Semibold";
-        private static string BodyFallback => HasVariable ? "Segoe UI Variable Text" : "Segoe UI";
+        private static string BodyFamily => HasVariable ? "Segoe UI Variable Text" : "Segoe UI";
 
-        /// <summary>Judul (Funnel Display SemiBold).</summary>
         public static Font FontHead(float sizePt = 16f, FontStyle style = FontStyle.Bold)
-            => Make(_famSemi, HeadFallback, sizePt, style & ~FontStyle.Bold);
+            => Make(BodyFamily, sizePt, style);
 
         /// <summary>Judul tampilan besar (sapaan beranda, judul halaman).</summary>
         public static Font FontDisplay(float sizePt = 28f)
-            => Make(_famSemi, HeadFallback, sizePt, FontStyle.Regular);
+            => Make(BodyFamily, sizePt, FontStyle.Bold);
 
-        /// <summary>Label tombol, nama berkas (Funnel Display Medium).</summary>
         public static Font FontLabel(float sizePt = 10.5f, FontStyle style = FontStyle.Regular)
-            => Make(_famMedium, LabelFallback, sizePt, style);
+            => Make(BodyFamily, sizePt, style);
 
-        /// <summary>Isi & keterangan (Funnel Display Regular).</summary>
         public static Font FontBody(float sizePt = 10f, FontStyle style = FontStyle.Regular)
-            => Make(_famRegular, BodyFallback, sizePt, style);
+            => Make(BodyFamily, sizePt, style);
 
         public static Font FontMono(float sizePt = 10f)
         {
             _monoName ??= FontExists("Cascadia Mono") ? "Cascadia Mono" : "Consolas";
-            return Make(null, _monoName, sizePt, FontStyle.Regular);
+            return Make(_monoName, sizePt, FontStyle.Regular);
         }
 
         // ================= Bentuk =================
@@ -374,7 +335,7 @@ namespace DepupOfficeDesktop.Core
                 AutoSize = width == 0,
                 Padding = new Padding(12, 4, 12, 4),
                 UseVisualStyleBackColor = false,
-                CornerRadius = 999        // pil penuh seperti tombol Android
+                CornerRadius = 8
             };
             if (width > 0) btn.Width = width;
             btn.FlatAppearance.BorderSize = 0;
@@ -793,11 +754,6 @@ namespace DepupOfficeDesktop.Core
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
-
-        private const uint FR_PRIVATE = 0x10;
-
-        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
-        private static extern int AddFontResourceEx(string lpszFilename, uint fl, IntPtr pdv);
 
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hWnd, string? pszSubAppName, string? pszSubIdList);

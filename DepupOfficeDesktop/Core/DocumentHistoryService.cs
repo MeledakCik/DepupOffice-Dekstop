@@ -124,6 +124,19 @@ public sealed class DocumentHistoryService : IDocumentHistoryService
         if (item is null)
             return false;
 
+        if (oldKey != newKey)
+        {
+            var existing = await db.DocumentHistory.SingleOrDefaultAsync(entry => entry.PathKey == newKey, cancellationToken);
+            if (existing != null)
+            {
+                // A previously deleted file can leave a history entry at the destination name.
+                // Keep the source document's history and use the row that already owns the destination key.
+                existing.LastOpenedUtc = item.LastOpenedUtc;
+                existing.IsBookmarked = item.IsBookmarked;
+                db.DocumentHistory.Remove(item);
+                item = existing;
+            }
+        }
         item.FilePath = file.FullName;
         item.PathKey = newKey;
         item.FileName = file.Name;

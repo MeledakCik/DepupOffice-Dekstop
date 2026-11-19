@@ -23,7 +23,6 @@ namespace DepupOfficeDesktop.Forms
         private readonly IDocumentHistoryService _historyService;
         private CancellationTokenSource? _recentLoadCts;
         private int _currentTab = 0; // 0 = Beranda, 1 = Dokumen, 2 = Buat, 3 = Alat, 4 = Saya
-        private int _filterMode = 0; // 0 = Semua Terkini, 1 = Ditandai
         private string _searchQuery = "";
 
         // Pengaman anti "tab/jendela ganda": klik ganda atau drop ganda tidak boleh membuka berkas dua kali.
@@ -35,7 +34,6 @@ namespace DepupOfficeDesktop.Forms
         private string _lastDropKey = "";
         private long _lastDropTick;
 
-        private Label _barTitleLbl = null!;
         private Panel _contentHost = null!;
         private readonly Dictionary<int, NavItem> _navItems = new();
         private readonly string[] _tabNames = { "Beranda", "Dokumen", "Buat", "Alat", "Saya" };
@@ -48,7 +46,7 @@ namespace DepupOfficeDesktop.Forms
             // Skala DPI harus ditetapkan sebelum satu pun kontrol dibuat.
             Theme.SetDpi(DeviceDpi);
 
-            Text = "Depup Office Desktop v" + Theme.AppVersion + " — 100% Offline Document, PDF Editor & Vault Suite";
+            Text = "Depup Office Desktop";
             var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
             Size = new Size(Math.Min(Theme.S(1280), (int)(workArea.Width * 0.92)), Math.Min(Theme.S(840), (int)(workArea.Height * 0.92)));
             MinimumSize = new Size(Math.Min(Theme.S(720), workArea.Width), Math.Min(Theme.S(520), workArea.Height));
@@ -84,14 +82,13 @@ namespace DepupOfficeDesktop.Forms
             DragDrop += _dragDropHandler;
 
             BuildShell();
-            SelectTab(0);
 
             // Susun ulang halaman (dengan jeda singkat) saat lebar area konten berubah: drag, maximize, restore.
             _reflowTimer = new System.Windows.Forms.Timer { Interval = 150 };
             _reflowTimer.Tick += (s, e) =>
             {
                 _reflowTimer.Stop();
-                if (WantCompactNav() != _compactNav && _activeViewer == null)
+                if (WantCompactNav() != _compactNav)
                 {
                     _reflowOnly = true;
                     try { RebuildShellForDpi(); } finally { _reflowOnly = false; }   // ganti navigasi lebar ↔ ringkas
@@ -99,7 +96,7 @@ namespace DepupOfficeDesktop.Forms
                 else if (Math.Abs(AvailableWidth() - _builtAvailWidth) > 2)
                 {
                     _reflowOnly = true;
-                    try { RenderCurrentTab(); } finally { _reflowOnly = false; }
+                    try { RenderCurrentTab(preserveScroll: true); } finally { _reflowOnly = false; }
                 }
             };
 
@@ -122,8 +119,22 @@ namespace DepupOfficeDesktop.Forms
                 if (e.Control && e.KeyCode == Keys.K)
                 {
                     e.SuppressKeyPress = true;
+                    CloseEmbeddedViewer();
                     _searchBox.Input.Focus();
                     _searchBox.Input.SelectAll();
+                    return;
+                }
+                if (e.Control && !e.Alt && e.KeyCode == Keys.O)
+                {
+                    e.SuppressKeyPress = true;
+                    CloseEmbeddedViewer();
+                    RunGuarded(PickAndOpenSupportedFile);
+                    return;
+                }
+                if (e.Control && e.Shift && !e.Alt && e.KeyCode == Keys.S && _activeViewer == null)
+                {
+                    e.SuppressKeyPress = true;
+                    RunGuarded(() => StartScanFlow());
                     return;
                 }
                 // Zoom tampilan seperti VS Code: Ctrl + / Ctrl − / Ctrl 0 (Reader punya zoom sendiri)
@@ -137,9 +148,7 @@ namespace DepupOfficeDesktop.Forms
 
             Shown += (s, e) =>
             {
-                // The client area has its final DPI-scaled size only after the
-                // form is shown, so perform one final responsive layout pass.
-                RenderCurrentTab();
+                SelectTab(TAB_HOME, force: true);
                 if (!string.IsNullOrWhiteSpace(_initialFilePath) && File.Exists(_initialFilePath))
                     OpenDocument(_initialFilePath);
             };
@@ -160,7 +169,7 @@ namespace DepupOfficeDesktop.Forms
             }
             else if (files.All(file => new[] { ".jpg", ".jpeg", ".png", ".bmp" }.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase)))
             {
-                RunGuarded(() => QuickProcessDroppedFiles(files));
+                RunGuarded(() => StartScanFlow(files));
             }
             else
             {
@@ -206,7 +215,7 @@ namespace DepupOfficeDesktop.Forms
             using var ofd = new OpenFileDialog
             {
                 Title = "Pilih Dokumen untuk Dibuka",
-                Filter = "Format yang didukung (*.pdf;*.docx;*.xlsx;*.pptx;*.csv;*.jpg;*.jpeg;*.png)|*.pdf;*.docx;*.xlsx;*.pptx;*.csv;*.jpg;*.jpeg;*.png|Semua berkas (*.*)|*.*"
+                Filter = AppStorage.DocumentPickerFilter
             };
             if (ofd.ShowDialog(this) == DialogResult.OK)
                 OpenDocument(ofd.FileName);
@@ -216,6 +225,7 @@ namespace DepupOfficeDesktop.Forms
         {
             // Sedang membuka satu berkas (termasuk saat menunggu riwayat tersimpan): tolak permintaan kedua.
             if (_openingDocument) return;
+            filePath = Path.GetFullPath(filePath);
 
             if (!AppStorage.IsSupportedDocument(filePath))
             {
@@ -235,49 +245,53 @@ namespace DepupOfficeDesktop.Forms
                 try { await OpenProtectedDocumentAsync(filePath); }
                 catch (Exception ex) { MessageBox.Show(this, $"Dokumen terlindungi tidak dapat dibuka:\n{ex.Message}", "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 finally { _openingDocument = false; _lastActionTick = Environment.TickCount64; }
-                RenderCurrentTab();
+                if (!IsDisposed && !Disposing) RenderCurrentTab();
                 return;
             }
-
-            // PDF ber-password: minta password dulu (dibatalkan = tidak jadi dibuka).
-            if (filePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) && !PdfEngine.EnsureUnlocked(this, filePath))
-                return;
 
             _openingDocument = true;
             try
             {
-                try
-                {
-                    await _historyService.RecordOpenedAsync(filePath);
-                }
-                catch (Exception ex)
-                {
-                    Theme.Toast(this, $"Riwayat lokal tidak dapat diperbarui: {ex.Message}");
-                }
-
-                AppStorage.AddRecent(filePath);
-                await ShowViewerEmbeddedAsync(filePath);
+                if (!IsDisposed && !Disposing) await ShowViewerEmbeddedAsync(filePath);
             }
             catch (Exception ex)
             {
                 // berkas rusak / format tidak terbaca: jangan sampai menutup aplikasi
-                CloseEmbeddedViewer();
-                MessageBox.Show(this, $"Berkas tidak dapat dibuka:\n{Path.GetFileName(filePath)}\n\n{ex.Message}", "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (!IsDisposed && !Disposing)
+                {
+                    CloseEmbeddedViewer();
+                    MessageBox.Show(this, $"Berkas tidak dapat dibuka:\n{Path.GetFileName(filePath)}\n\n{ex.Message}", "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
             finally
             {
                 _openingDocument = false;
                 _lastActionTick = Environment.TickCount64;
             }
-            RenderCurrentTab();
+            if (!IsDisposed && !Disposing) RenderCurrentTab(preserveScroll: true);
         }
 
         /// <summary>
         /// Tampilkan Reader DI DALAM jendela utama (menutupi area konten), bukan sebagai jendela kedua.
         /// Task selesai saat Reader ditutup.
         /// </summary>
-        private Task ShowViewerEmbeddedAsync(string filePath, ViewerOptions? options = null)
+        private async Task ShowViewerEmbeddedAsync(string filePath, ViewerOptions? options = null)
         {
+            bool trackOpenedFile = options == null;
+            Task recording = Task.CompletedTask;
+            options ??= new ViewerOptions
+            {
+                BookmarkChanged = async (path, value) =>
+                {
+                    await recording;
+                    return await _historyService.SetBookmarkedAsync(path, value);
+                },
+                Rename = async path =>
+                {
+                    await recording;
+                    return !IsDisposed && !Disposing && ShowRenameDialog(path);
+                }
+            };
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var viewer = new ViewerForm(filePath, options)
             {
@@ -293,19 +307,62 @@ namespace DepupOfficeDesktop.Forms
             _viewerHost = host;
             _activeViewer = viewer;
 
+            if (trackOpenedFile)
+                viewer.DocumentReady += () => recording = RecordOpenedHistoryAsync(filePath);
             viewer.FormClosed += (s, e) =>
             {
                 _activeViewer = null;
                 _viewerHost = null;
                 _rightHost.Controls.Remove(host);
                 host.Dispose();
+                if (_navItems.TryGetValue(_currentTab, out var nav) && !nav.IsDisposed) nav.Focus();
                 tcs.TrySetResult();
             };
-            viewer.Show();
-            return tcs.Task;
+            try { viewer.Show(); }
+            catch
+            {
+                _activeViewer = null;
+                _viewerHost = null;
+                host.Dispose();
+                throw;
+            }
+            await tcs.Task;
+            await recording;
+        }
+
+        private async Task RecordOpenedHistoryAsync(string path)
+        {
+            AppStorage.AddRecent(path);
+            try { await Task.Run(() => _historyService.RecordOpenedAsync(path)); }
+            catch (Exception ex)
+            {
+                if (!IsDisposed && !Disposing) Theme.Toast(this, $"Riwayat lokal tidak dapat diperbarui: {ex.Message}");
+            }
         }
 
         private void CloseEmbeddedViewer() => _activeViewer?.Close();
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            base.OnFormClosing(e);
+            if (!e.Cancel) CloseEmbeddedViewer();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (_themeChanged != null) Theme.Changed -= _themeChanged;
+                _recentLoadCts?.Cancel();
+                _recentLoadCts?.Dispose();
+                _recentLoadCts = null;
+                _searchTimer.Dispose();
+                _reflowTimer?.Dispose();
+                _navTips.Dispose();
+                _formBackdrop.Dispose();
+            }
+            base.Dispose(disposing);
+        }
 
         private void EditDocument(string filePath)
         {
@@ -327,7 +384,7 @@ namespace DepupOfficeDesktop.Forms
             RenderCurrentTab();
         }
 
-        private void ShowRenameDialog(string filePath)
+        private bool ShowRenameDialog(string filePath)
         {
             using var dlg = new Form
             {
@@ -340,52 +397,54 @@ namespace DepupOfficeDesktop.Forms
                 BackColor = Theme.SURFACE
             };
             var lbl = new Label { Text = "Nama berkas baru:", Location = new Point(18, 18), AutoSize = true, Font = Theme.FontLabel(9.5f) };
-            var txt = new TextBox { Text = AppStorage.BaseName(Path.GetFileName(filePath)), Location = new Point(18, 46), Width = 365, Font = Theme.FontBody(10f) };
+            var txt = new TextBox { Text = Path.GetFileNameWithoutExtension(filePath), Location = new Point(18, 46), Width = 365, Font = Theme.FontBody(10f) };
             var btn = Theme.CreateButton("Simpan Nama", true, Theme.ACCENT, 36, 140);
             btn.Location = new Point(243, 86);
+            bool succeeded = false;
             btn.Click += async (s, e) =>
             {
-                bool wasBookmarked = AppStorage.IsBookmarked(filePath);
                 string? renamed = AppStorage.RenameFile(filePath, txt.Text);
-                if (renamed != null)
+                if (renamed == null)
                 {
-                    try
-                    {
-                        if (!await _historyService.UpdatePathAsync(filePath, renamed))
-                            await _historyService.RecordOpenedAsync(renamed);
-                        if (wasBookmarked)
-                        {
-                            AppStorage.ToggleBookmark(filePath);
-                            AppStorage.ToggleBookmark(renamed);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Theme.Toast(this, $"Nama berubah, tetapi riwayat gagal diperbarui: {ex.Message}");
-                    }
-                    Theme.Toast(this, $"Nama berkas diubah ke {Path.GetFileName(renamed)}");
-                    dlg.Close();
-                    RenderCurrentTab();
+                    Theme.Toast(dlg, "Nama tidak dapat disimpan. Periksa nama atau pilih nama lain.");
+                    return;
                 }
+                succeeded = true;
+                btn.Enabled = false;
+                try
+                {
+                    if (!await _historyService.UpdatePathAsync(filePath, renamed))
+                        await _historyService.RecordOpenedAsync(renamed);
+                }
+                catch (Exception ex)
+                {
+                    Theme.Toast(this, $"Nama berubah, tetapi riwayat gagal diperbarui: {ex.Message}");
+                }
+                if (!dlg.IsDisposed) dlg.Close();
+                if (_activeViewer == null && !IsDisposed) RenderCurrentTab(preserveScroll: true);
             };
+            dlg.AcceptButton = btn;
             dlg.Controls.AddRange(new Control[] { lbl, txt, btn });
             ShowScaledDialog(dlg);
+            return succeeded;
         }
 
-        private void StartPdfEditorFlow()
+        private void StartPdfEditorFlow() => StartPdfEditorFlow(annotate: false);
+
+        private void StartPdfEditorFlow(bool annotate)
         {
             using var ofd = new OpenFileDialog
             {
-                Title = "Pilih PDF atau Gambar untuk Diedit",
-                Filter = "PDF / Gambar (*.pdf;*.jpg;*.jpeg;*.png;*.bmp)|*.pdf;*.jpg;*.jpeg;*.png;*.bmp"
+                Title = annotate ? "Pilih PDF untuk diberi anotasi" : "Pilih PDF atau gambar untuk diedit",
+                Filter = annotate ? Ui.FilterPdf : "PDF / Gambar (*.pdf;*.jpg;*.jpeg;*.png;*.bmp)|*.pdf;*.jpg;*.jpeg;*.png;*.bmp"
             };
             if (ofd.ShowDialog(this) == DialogResult.OK)
-                OpenPdfEditor(ofd.FileName);
+                OpenPdfEditor(ofd.FileName, annotate);
         }
 
-        internal void OpenPdfEditor(string path)
+        internal void OpenPdfEditor(string path, bool annotate = false)
         {
-            using var editor = new PdfEditorForm(path);
+            using var editor = new PdfEditorForm(path, this, annotate);
             if (!editor.Ready) return;
             editor.ShowDialog(this);
             if (!string.IsNullOrWhiteSpace(editor.SavedPath) && File.Exists(editor.SavedPath))
@@ -402,7 +461,8 @@ namespace DepupOfficeDesktop.Forms
             if (mime.StartsWith("image/"))
             {
                 string outPdf = AppStorage.NewOut("gambar", "pdf");
-                PdfEngine.ImagesToPdf(files.Where(f => AppStorage.MimeByName(f).StartsWith("image/")).ToList(), outPdf);
+                var pictures = files.Where(file => AppStorage.MimeByName(file).StartsWith("image/")).ToList();
+                if (!Ui.Busy(this, "Menggabungkan gambar ke PDF…", progress => PdfEngine.ImagesToPdf(pictures, outPdf, progress: progress))) return;
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Gambar ke PDF", outPdf);
                 ShowOperationResultDialog("PDF Dibuat dari Gambar", outPdf);
@@ -441,7 +501,9 @@ namespace DepupOfficeDesktop.Forms
             AddAct("🖼️ Ekstrak Halaman PDF ke JPG", () =>
             {
                 if (!PdfEngine.EnsureUnlocked(this, first)) return;
-                int n = PdfEngine.ToJpg(first, AppStorage.BaseName(Path.GetFileName(first)));
+                var (ok, n) = Ui.Busy(this, "Mengekspor halaman PDF ke JPG…",
+                    progress => PdfEngine.ToJpg(first, AppStorage.BaseName(Path.GetFileName(first)), progress));
+                if (!ok) return;
                 MessageBox.Show(this, $"{n} halaman disimpan sebagai JPG di:\n{AppStorage.PicturesDir}", "PDF ke JPG", MessageBoxButtons.OK, MessageBoxIcon.Information);
             });
             AddAct("✍️ Bubuhkan Tanda Tangan Digital", () => SignPdfForFile(first));
@@ -511,8 +573,10 @@ namespace DepupOfficeDesktop.Forms
             btnMerge.Click += (s, e) =>
             {
                 string outPdf = AppStorage.NewOut("gabung", "pdf");
-                // Lossless (teks tetap asli); jatuh ke metode render bila struktur PDF tidak terbaca.
-                try { PdfToolsX.MergeAny(list, outPdf); } catch { PdfEngine.Merge(list, outPdf); }
+                if (!Ui.Busy(dlg, "Menggabungkan PDF…", _ =>
+                {
+                    try { PdfToolsX.MergeAny(list, outPdf); } catch (PdfException) { PdfEngine.Merge(list, outPdf); }
+                })) return;
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Gabung PDF", outPdf);
                 dlg.Close();
@@ -562,7 +626,10 @@ namespace DepupOfficeDesktop.Forms
                 int t = (int)numTo.Value;
                 if (f > t) { Theme.Toast(dlg, "Rentang halaman tidak valid"); return; }
                 string outPdf = AppStorage.NewOut($"pisah_{f}-{t}", "pdf");
-                try { PdfToolsX.SplitLossless(pdfPath, f, t, outPdf); } catch { PdfEngine.Split(pdfPath, f, t, outPdf); }
+                if (!Ui.Busy(dlg, "Memisahkan halaman PDF…", _ =>
+                {
+                    try { PdfToolsX.SplitLossless(pdfPath, f, t, outPdf); } catch (PdfException) { PdfEngine.Split(pdfPath, f, t, outPdf); }
+                })) return;
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Pisah PDF", outPdf);
                 dlg.Close();
@@ -655,7 +722,11 @@ namespace DepupOfficeDesktop.Forms
             bSave.Click += (s, e) =>
             {
                 string outPdf = AppStorage.NewOut("susun_" + AppStorage.BaseName(Path.GetFileName(pdfPath)), "pdf");
-                try { PdfToolsX.OrganizeLossless(pdfPath, pageOrder, rotations, outPdf); } catch { PdfEngine.OrganizePdf(pdfPath, pageOrder, rotations, outPdf); }
+                if (!Ui.Busy(dlg, "Menyusun halaman PDF…", _ =>
+                {
+                    try { PdfToolsX.OrganizeLossless(pdfPath, pageOrder, rotations, outPdf); }
+                    catch (PdfException) { PdfEngine.OrganizePdf(pdfPath, pageOrder, rotations, outPdf); }
+                })) return;
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Susun PDF", outPdf);
                 dlg.Close();
@@ -673,8 +744,10 @@ namespace DepupOfficeDesktop.Forms
             using var ofd = new OpenFileDialog { Title = "Pilih PDF untuk Diekstrak Gambarnya", Filter = "PDF Files (*.pdf)|*.pdf" };
             if (ofd.ShowDialog(this) != DialogResult.OK) return;
             if (!PdfEngine.EnsureUnlocked(this, ofd.FileName)) return;
-            int count = PdfEngine.ExtractImagesFromPdf(ofd.FileName, AppStorage.BaseName(Path.GetFileName(ofd.FileName)));
-            MessageBox.Show(this, $"✓ Berhasil menyedot & mengekstrak {count} gambar halaman dari PDF ke:\n{AppStorage.PicturesDir}", "Ekstrak Foto Selesai", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            string path = ofd.FileName;
+            var (ok, count) = Ui.Busy(this, "Mengambil gambar asli di PDF…",
+                progress => PdfToolsX.ExtractEmbeddedImages(path, AppStorage.PicturesDir, AppStorage.BaseName(path), progress));
+            if (ok) ShowExportedImages(count, "gambar dari PDF");
         }
 
         // --- 5. Kompres PDF Target SSCASN / CPNS ---
@@ -715,9 +788,9 @@ namespace DepupOfficeDesktop.Forms
             cmbTarget.Items.AddRange(new object[] { "< 200 KB", "< 500 KB (Rekomendasi SSCASN)", "< 1 MB", "< 2 MB" });
             cmbTarget.SelectedIndex = 1;
 
-            var rbLevel = new RadioButton { Text = "Atau Pilih Tingkat Kompresi Persentase:", Font = Theme.FontLabel(9.5f), Location = new Point(20, 134), AutoSize = true };
+            var rbLevel = new RadioButton { Text = "Atau pilih tingkat kompresi:", Font = Theme.FontLabel(9.5f), Location = new Point(20, 134), AutoSize = true };
             var cmbLevel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(40, 160), Width = 390 };
-            cmbLevel.Items.AddRange(new object[] { "Ringan (~15%)", "Sedang (~35%)", "Tinggi (~60%)" });
+            cmbLevel.Items.AddRange(new object[] { "Ringan", "Sedang", "Tinggi" });
             cmbLevel.SelectedIndex = 1;
 
             var btnCompress = Theme.CreateButton("🗜️ Kompres Sekarang", true, Theme.TEAL, 40, 410);
@@ -725,16 +798,23 @@ namespace DepupOfficeDesktop.Forms
             btnCompress.Click += (s, e) =>
             {
                 string outPdf = AppStorage.NewOut("kompres", "pdf");
-                if (rbTarget.Checked)
-                    PdfEngine.CompressToTarget(pdfPath, targetVals[Math.Clamp(cmbTarget.SelectedIndex, 0, 3)], outPdf);
-                else
-                    PdfEngine.Compress(pdfPath, Math.Clamp(cmbLevel.SelectedIndex, 0, 2), outPdf);
+                int? target = rbTarget.Checked ? targetVals[Math.Clamp(cmbTarget.SelectedIndex, 0, 3)] : null;
+                int level = Math.Clamp(cmbLevel.SelectedIndex, 0, 2);
+                if (!Ui.Busy(dlg, "Mengompres PDF…", progress =>
+                {
+                    if (target is int kb) PdfEngine.CompressToTarget(pdfPath, kb, outPdf, progress);
+                    else PdfEngine.Compress(pdfPath, level, outPdf, progress);
+                })) return;
 
                 long after = new FileInfo(outPdf).Length;
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Kompres PDF", outPdf);
                 dlg.Close();
-                ShowOperationResultDialog("PDF Berhasil Dikompres", outPdf, $"Sebelum: {AppStorage.FmtSize(before)}  →  Sesudah: {AppStorage.FmtSize(after)}");
+                string detail = $"Sebelum: {AppStorage.FmtSize(before)}  →  Sesudah: {AppStorage.FmtSize(after)}";
+                if (target is int targetKb && after > targetKb * 1024L)
+                    detail += $"\nUkuran terkecil masih di atas target {targetKb} KB.";
+                else if (after == before) detail += "\nUkuran asli dipertahankan.";
+                ShowOperationResultDialog("Hasil Kompresi PDF", outPdf, detail);
                 RenderCurrentTab();
             };
 
@@ -752,7 +832,9 @@ namespace DepupOfficeDesktop.Forms
                 Filter = "Gambar (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp"
             };
             if (ofd.ShowDialog(this) != DialogResult.OK || ofd.FileNames.Length == 0) return;
-            int n = PdfEngine.BatchImagesToIndividualPdf(ofd.FileNames);
+            var paths = ofd.FileNames;
+            var (ok, n) = Ui.Busy(this, "Mengonversi gambar ke PDF…", progress => PdfEngine.BatchImagesToIndividualPdf(paths, progress));
+            if (!ok) return;
             MessageBox.Show(this, $"✓ Berhasil mengonversi {n} foto menjadi {n} berkas PDF terpisah di:\n{AppStorage.OutDir}", "Konversi Massal Selesai", MessageBoxButtons.OK, MessageBoxIcon.Information);
             RenderCurrentTab();
         }
@@ -905,7 +987,8 @@ namespace DepupOfficeDesktop.Forms
             };
             if (ofd.ShowDialog(this) != DialogResult.OK || ofd.FileNames.Length == 0) return;
             string outPdf = AppStorage.NewOut("gambar_gabung", "pdf");
-            PdfEngine.ImagesToPdf(ofd.FileNames, outPdf);
+            var paths = ofd.FileNames;
+            if (!Ui.Busy(this, "Menggabungkan gambar ke PDF…", progress => PdfEngine.ImagesToPdf(paths, outPdf, progress: progress))) return;
             AppStorage.AddRecent(outPdf);
             AppStorage.SetLastJob("Gambar ke PDF", outPdf);
             ShowOperationResultDialog($"PDF Dibuat dari {ofd.FileNames.Length} Gambar", outPdf);
@@ -1010,7 +1093,8 @@ namespace DepupOfficeDesktop.Forms
                 using var sig = pad.ToBitmap();
                 if (sig == null) { Theme.Toast(dlg, "Tanda tangan masih kosong"); return; }
                 string outPdf = AppStorage.NewOut("ttd_" + AppStorage.BaseName(Path.GetFileName(pdfPath)), "pdf");
-                PdfEngine.Sign(pdfPath, sig, (int)numPage.Value, cmbPos.SelectedIndex, outPdf);
+                int page = (int)numPage.Value, position = cmbPos.SelectedIndex;
+                if (!Ui.Busy(dlg, "Menempelkan tanda tangan…", _ => PdfEngine.Sign(pdfPath, sig, page, position, outPdf))) return;
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Tanda Tangan PDF", outPdf);
                 dlg.Close();
@@ -1025,7 +1109,8 @@ namespace DepupOfficeDesktop.Forms
                 using var sig = Ui.PickStamp(dlg, "Pilih Tanda Tangan / Stempel");
                 if (sig == null) return;
                 string outPdf = AppStorage.NewOut("ttd_" + AppStorage.BaseName(Path.GetFileName(pdfPath)), "pdf");
-                PdfEngine.Sign(pdfPath, sig, (int)numPage.Value, cmbPos.SelectedIndex, outPdf);
+                int page = (int)numPage.Value, position = cmbPos.SelectedIndex;
+                if (!Ui.Busy(dlg, "Menempelkan tanda tangan…", _ => PdfEngine.Sign(pdfPath, sig, page, position, outPdf))) return;
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Tanda Tangan PDF", outPdf);
                 dlg.Close();
@@ -1039,52 +1124,26 @@ namespace DepupOfficeDesktop.Forms
         // --- Modal Hasil Olahan (ResultSheet di Ui.kt) ---
         private void ShowOperationResultDialog(string title, string filePath, string extraInfo = "")
         {
-            var fi = new FileInfo(filePath);
-            using var dlg = new Form
-            {
-                Text = title,
-                Size = new Size(480, 340),
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                BackColor = Theme.SURFACE
-            };
-
-            var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(22) };
-            flow.Controls.Add(new Label { Text = $"✓ {title}", Font = Theme.FontHead(14f), ForeColor = Theme.TEAL, AutoSize = true });
-            flow.Controls.Add(new Label { Text = $"{fi.Name} • {AppStorage.FmtSize(fi.Length)}", Font = Theme.FontBody(9.5f), ForeColor = Theme.MUTED, AutoSize = true, Margin = new Padding(0, 4, 0, 8) });
-
+            var file = new FileInfo(filePath);
+            using var dialog = new Dlg(title, "", 520);
+            dialog.Label(file.Name, bold: true);
+            dialog.Label(AppStorage.FmtSize(file.Length));
             if (!string.IsNullOrWhiteSpace(extraInfo))
+                dialog.Label(extraInfo, top: 10);
+
+            var saveCopy = dialog.SmallButton("Simpan salinan", () =>
             {
-                flow.Controls.Add(new Label { Text = extraInfo, Font = Theme.FontLabel(9.5f), ForeColor = Theme.ACCENT, AutoSize = true, Margin = new Padding(0, 0, 0, 10) });
-            }
-
-            var btnOpen = Theme.CreateButton("📖 Buka Dokumen Sekarang", true, Theme.ACCENT, 40, 420);
-            btnOpen.Margin = new Padding(0, 4, 0, 8);
-            btnOpen.Click += (s, e) => { dlg.Close(); OpenDocument(filePath); };
-
-            var btnSaveDl = Theme.CreateButton("⬇️ Simpan Salinan ke Documents\\DepupOffice\\Salinan", false, Theme.TEAL, 36, 420);
-            btnSaveDl.Margin = new Padding(0, 0, 0, 8);
-            btnSaveDl.Click += (s, e) =>
+                string destination = AppStorage.SaveToDownloads(filePath);
+                Theme.Toast(dialog, $"Salinan tersimpan di {destination}");
+            });
+            var reveal = dialog.SmallButton("Lihat di Explorer", () =>
             {
-                string dst = AppStorage.SaveToDownloads(filePath);
-                Theme.Toast(dlg, $"Disimpan di: {dst}");
-            };
-
-            var btnVault = Theme.CreateButton("🔒 Masukkan ke Brankas AES-256", false, Theme.AMBER, 36, 420);
-            btnVault.Margin = new Padding(0, 0, 0, 8);
-            btnVault.Click += (s, e) => { dlg.Close(); LockFileIntoVaultFlow(filePath); };
-
-            var btnExplorer = Theme.CreateButton("📂 Tampilkan di Windows Explorer", false, Theme.TEXT, 36, 420);
-            btnExplorer.Click += (s, e) =>
-            {
-                try { Process.Start("explorer.exe", $"/select,\"{filePath}\""); } catch { }
-            };
-
-            flow.Controls.AddRange(new Control[] { btnOpen, btnSaveDl, btnVault, btnExplorer });
-            dlg.Controls.Add(flow);
-            ShowScaledDialog(dlg);
+                Process.Start("explorer.exe", $"/select,\"{filePath}\"");
+            });
+            dialog.Row(saveCopy, reveal);
+            dialog.Action("Buka dokumen", true, () => { dialog.Close(); OpenDocument(filePath); });
+            dialog.Action("Simpan ke Brankas", false, () => { dialog.Close(); LockFileIntoVaultFlow(filePath); });
+            dialog.ShowDialog(this);
         }
 
         // --- Manajer Folder DepupOffice (showFolderExplorerSheet di MainActivity.kt) ---
@@ -1115,8 +1174,8 @@ namespace DepupOfficeDesktop.Forms
 
             void RenderFolderList()
             {
-                var allFiles = AppStorage.GetOutFiles();
-                chipsFlow.Controls.Clear();
+                var allFiles = AppStorage.GetOutFiles(includeImages: true);
+                foreach (Control control in chipsFlow.Controls.Cast<Control>().ToArray()) control.Dispose();
                 string[] cats = { "SEMUA", "PDF", "Word", "Excel", "Gambar" };
                 foreach (string cat in cats)
                 {

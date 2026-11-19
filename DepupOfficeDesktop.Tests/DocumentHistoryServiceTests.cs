@@ -48,6 +48,27 @@ public sealed class DocumentHistoryServiceTests
     }
 
     [Fact]
+    public async Task RenamingToPreviouslyUsedPathKeepsSourceBookmark()
+    {
+        using var temp = new TemporaryDirectory();
+        var service = CreateService(Path.Combine(temp.Path, "history.db"));
+        string source = Path.Combine(temp.Path, "current.pdf");
+        string destination = Path.Combine(temp.Path, "reused.pdf");
+        await File.WriteAllTextAsync(destination, "old file");
+        await service.RecordOpenedAsync(destination);
+        File.Delete(destination);
+        await File.WriteAllTextAsync(source, "current file");
+        await service.RecordOpenedAsync(source);
+        await service.SetBookmarkedAsync(source, true);
+        File.Move(source, destination);
+
+        Assert.True(await service.UpdatePathAsync(source, destination));
+        var entry = Assert.Single(await service.GetRecentAsync());
+        Assert.Equal(destination, entry.FilePath);
+        Assert.True(entry.IsBookmarked);
+    }
+
+    [Fact]
     public async Task ImportsLegacyJsonHistoryAndBookmarksOnce()
     {
         using var temp = new TemporaryDirectory();

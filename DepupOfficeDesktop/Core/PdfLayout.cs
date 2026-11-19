@@ -92,6 +92,27 @@ namespace DepupOfficeDesktop.Core
             return new PageOut(ow, oh, r.Glyphs, r.Images, r.Shapes);
         }
 
+        internal static string ReadText(PdfFile file, PdfFile.Page page)
+        {
+            var text = new StringBuilder();
+            Glyph? previous = null;
+            foreach (var glyph in Page(file, page).Glyphs)
+            {
+                if (glyph.Text.Length == 0) continue;
+                if (previous != null && text.Length > 0 && !char.IsWhiteSpace(text[text.Length - 1]))
+                {
+                    float tolerance = Math.Max(2f, Math.Min(previous.Size, glyph.Size) * 0.45f);
+                    if (Math.Abs(glyph.Y - previous.Y) > tolerance || glyph.X < previous.X - tolerance)
+                        text.AppendLine();
+                    else if (glyph.X - previous.X - previous.W > tolerance * 0.6f)
+                        text.Append(' ');
+                }
+                text.Append(glyph.Text);
+                previous = glyph;
+            }
+            return text.ToString().Trim();
+        }
+
         // ------------------------------------------------------------------ matriks
         public sealed class M
         {

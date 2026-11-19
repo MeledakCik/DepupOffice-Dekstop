@@ -18,9 +18,12 @@ namespace DepupOfficeDesktop.Core
             try
             {
                 if (!PdfEngine.EnsureUnlocked(owner, filePath)) return;
-                var pages = PdfEngine.RenderAllPages(filePath, 1600);
-                try { PrintPages(owner, pages, documentName); }
-                finally { foreach (var b in pages) b.Dispose(); }
+                var (_, document) = Task.Run(() => PagedDocument.Open(filePath)).GetAwaiter().GetResult();
+                using (document)
+                {
+                    if (document == null) throw new InvalidDataException("PDF tidak dapat dibaca.");
+                    PrintDocumentPages(owner, document, documentName);
+                }
             }
             catch (Exception ex)
             {
@@ -30,20 +33,36 @@ namespace DepupOfficeDesktop.Core
 
         /// <summary>Cetak halaman yang sudah dirender (mis. slide PPTX). Bitmap TIDAK dibuang di sini.</summary>
         public static void PrintPages(Form owner, IReadOnlyList<Bitmap> pages, string documentName)
+            => PrintPages(owner, pages.Count, index => pages[index], documentName, disposePages: false);
+
+        internal static void PrintDocumentPages(Form owner, PagedDocument document, string documentName)
+            => PrintPages(owner, document.Count, index => Task.Run(() => document.Render(index, 1800)).GetAwaiter().GetResult(),
+                documentName, disposePages: true);
+
+        private static void PrintPages(Form owner, int count, Func<int, Bitmap> getPage, string documentName, bool disposePages)
         {
-            if (pages.Count == 0)
+            if (count == 0)
             {
                 Theme.Toast(owner, "Tidak ada halaman yang dapat dicetak");
                 return;
             }
             int pageIdx = 0;
+            int end = count;
             using var pd = new PrintDocument { DocumentName = $"DepupOffice_{documentName}" };
-            pd.BeginPrint += (s, e) => pageIdx = 0;   // pratinjau/cetak ulang mulai dari halaman pertama
+            pd.PrinterSettings.MinimumPage = pd.PrinterSettings.FromPage = 1;
+            pd.PrinterSettings.MaximumPage = pd.PrinterSettings.ToPage = count;
+            pd.BeginPrint += (s, e) =>
+            {
+                bool range = pd.PrinterSettings.PrintRange == PrintRange.SomePages;
+                pageIdx = range ? Math.Clamp(pd.PrinterSettings.FromPage - 1, 0, count - 1) : 0;
+                end = range ? Math.Clamp(pd.PrinterSettings.ToPage, pageIdx + 1, count) : count;
+            };
             pd.PrintPage += (s, e) =>
             {
-                if (e.Graphics != null && pageIdx < pages.Count)
+                if (e.Graphics != null && pageIdx < end)
                 {
-                    var bmp = pages[pageIdx];
+                    var bmp = getPage(pageIdx);
+                    using var owned = disposePages ? bmp : null;
                     Rectangle bounds = e.MarginBounds;
                     float scale = Math.Min((float)bounds.Width / bmp.Width, (float)bounds.Height / bmp.Height);
                     int dw = (int)(bmp.Width * scale);
@@ -53,10 +72,10 @@ namespace DepupOfficeDesktop.Core
                     e.Graphics.DrawImage(bmp, new Rectangle(dx, dy, dw, dh));
                 }
                 pageIdx++;
-                e.HasMorePages = pageIdx < pages.Count;
+                e.HasMorePages = pageIdx < end;
             };
 
-            using var dlg = new PrintDialog { Document = pd, UseEXDialog = true };
+            using var dlg = new PrintDialog { Document = pd, UseEXDialog = true, AllowSomePages = true };
             if (dlg.ShowDialog(owner) == DialogResult.OK)
                 pd.Print();
         }

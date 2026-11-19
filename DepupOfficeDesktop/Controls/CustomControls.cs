@@ -15,6 +15,7 @@ namespace DepupOfficeDesktop.Controls
     public class CardPanel : Panel
     {
         private bool _hover;
+        private Action? _activate;
         public int CornerRadius { get; set; } = 20;
         public Color BorderColor { get; set; } = Theme.LINE;
         public int BorderThickness { get; set; } = 1;
@@ -34,6 +35,40 @@ namespace DepupOfficeDesktop.Controls
             BackColor = Theme.SURFACE;
             Padding = new Padding(16);
         }
+
+        public void MakeAction(string name, Action activate)
+        {
+            _activate = activate;
+            AccessibleName = name;
+            AccessibleRole = AccessibleRole.PushButton;
+            SetStyle(ControlStyles.Selectable, true);
+            TabStop = true;
+            Cursor = Cursors.Hand;
+            Click += (s, e) => activate();
+            foreach (Control child in Controls)
+            {
+                child.Cursor = Cursors.Hand;
+                child.Click += (s, e) => activate();
+            }
+            AttachHover();
+        }
+
+        protected override bool IsInputKey(Keys keyData) =>
+            (_activate != null && keyData is Keys.Enter or Keys.Space) || base.IsInputKey(keyData);
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (_activate != null && e.KeyData is Keys.Enter or Keys.Space)
+            {
+                e.SuppressKeyPress = true;
+                _activate();
+                return;
+            }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
 
         /// <summary>Aktifkan efek hover untuk kartu beserta seluruh anak kontrolnya (panggil setelah semua anak ditambahkan).</summary>
         public void AttachHover()
@@ -81,6 +116,7 @@ namespace DepupOfficeDesktop.Controls
             if (IsGlassCard)
             {
                 PaintGlassCard(g);
+                PaintFocus(g);
                 return;
             }
             int inset = BorderThickness / 2;
@@ -100,7 +136,7 @@ namespace DepupOfficeDesktop.Controls
                     var top = new Rectangle(rect.X, rect.Y, rect.Width, Math.Max(1, rect.Height / 2));
                     using var gloss = new LinearGradientBrush(new Rectangle(top.X, top.Y - 1, top.Width, top.Height + 2),
                         Color.FromArgb(34, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), LinearGradientMode.Vertical);
-                    var oldClip = g.Clip;
+                    using var oldClip = g.Clip;
                     g.SetClip(path, CombineMode.Intersect);
                     g.FillRectangle(gloss, top);
                     g.Clip = oldClip;
@@ -124,7 +160,7 @@ namespace DepupOfficeDesktop.Controls
 
             if (AccentEdge is Color edge)
             {
-                var oldClip = g.Clip;
+                using var oldClip = g.Clip;
                 g.SetClip(path, CombineMode.Intersect);
                 using var eb = new SolidBrush(edge);
                 g.FillRectangle(eb, rect.X, rect.Y, Theme.S(3), rect.Height);
@@ -154,6 +190,15 @@ namespace DepupOfficeDesktop.Controls
                 using var hl = new Pen(Color.FromArgb(GradientStart.HasValue ? 70 : 26, 255, 255, 255), 1f);
                 g.DrawLine(hl, rect.X + radius, rect.Y + 1, rect.Right - radius, rect.Y + 1);
             }
+            PaintFocus(g);
+        }
+
+        private void PaintFocus(Graphics graphics)
+        {
+            if (_activate == null || !Focused || !ShowFocusCues || Width < 8 || Height < 8) return;
+            using var path = Theme.RoundedRect(Rectangle.Inflate(ClientRectangle, -2, -2), Theme.S(CornerRadius));
+            using var pen = new Pen(Theme.ACCENT_LIGHT, 2);
+            graphics.DrawPath(pen, path);
         }
 
         /// <summary>Kartu kaca: latar buram + lapisan putih/gelap semi-transparan + tepi sorot (gaya kaca Android).</summary>
@@ -368,6 +413,9 @@ namespace DepupOfficeDesktop.Controls
     {
         private static Color Inactive => Theme.MUTED;
         private bool _active, _hover;
+        private System.Windows.Forms.Timer? _selectionTimer;
+        private long _selectionStarted;
+        private float _selectionProgress = 1;
 
         public string Caption { get; set; } = "";
         /// <summary>Tautan sekunder (teks abu), mis. Privacy / Tentang di bawah sidebar.</summary>
@@ -375,7 +423,38 @@ namespace DepupOfficeDesktop.Controls
         public NavItemIcon Icon { get; set; }
         /// <summary>Mode ringkas (jendela sempit): hanya ikon di tengah, seperti navigation rail Android.</summary>
         public bool Compact { get; set; }
-        public bool Active { get => _active; set { _active = value; Invalidate(); } }
+        public bool Active { get => _active; set => SetActive(value, animate: false); }
+
+        public void SetActive(bool active, bool animate)
+        {
+            if (_active == active) return;
+            _active = active;
+            _selectionTimer?.Stop();
+            _selectionProgress = 1;
+            if (active && animate && Theme.MotionEnabled)
+            {
+                if (_selectionTimer == null)
+                {
+                    _selectionTimer = new System.Windows.Forms.Timer { Interval = 16 };
+                    _selectionTimer.Tick += (s, e) =>
+                    {
+                        _selectionProgress = Math.Min(1, (Environment.TickCount64 - _selectionStarted) / 145f);
+                        if (_selectionProgress >= 1) _selectionTimer.Stop();
+                        Invalidate();
+                    };
+                }
+                _selectionStarted = Environment.TickCount64;
+                _selectionProgress = 0;
+                _selectionTimer.Start();
+            }
+            Invalidate();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _selectionTimer?.Dispose();
+            base.Dispose(disposing);
+        }
 
         public NavItem()
         {
@@ -414,14 +493,21 @@ namespace DepupOfficeDesktop.Controls
             int vGap = Theme.S(3);
             var body = new Rectangle(0, vGap, Width - 1, Height - 1 - vGap * 2);
             if (body.Width <= 0 || body.Height <= 0) return;
-            int radius = body.Height / 2;   // pil penuh seperti navigasi bawah Android
+            int radius = Theme.S(8);
             using var path = Theme.RoundedRect(body, radius);
             if (_active)
-                using (var b = new SolidBrush(Theme.ACCENT)) g.FillPath(b, path);
+            {
+                using var fill = new SolidBrush(Theme.BLUE_BG);
+                using var accent = new Pen(Theme.ACCENT_LIGHT, Math.Max(2, Theme.S(3))) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                g.FillPath(fill, path);
+                float eased = 1 - (1 - _selectionProgress) * (1 - _selectionProgress);
+                float half = Theme.S(11) * eased;
+                g.DrawLine(accent, body.Left + Theme.S(4), Height / 2f - half, body.Left + Theme.S(4), Height / 2f + half);
+            }
             else if (_hover)
                 using (var b = new SolidBrush(pb.A < 255 ? Color.FromArgb(Theme.Dark ? 40 : 110, Theme.Dark ? Color.White : Theme.SURFACE2) : Theme.SURFACE2)) g.FillPath(b, path);
 
-            Color fg = _active ? Color.White : (Muted ? Inactive : Theme.TEXT);
+            Color fg = _active ? Theme.ACCENT_LIGHT : (Muted ? Inactive : Theme.TEXT);
             int chipSize = Theme.S(20);
             var chip = new Rectangle(Compact ? (Width - chipSize) / 2 : Theme.S(16), (Height - chipSize) / 2, chipSize, chipSize);
             DrawIcon(g, chip, fg);
@@ -436,7 +522,7 @@ namespace DepupOfficeDesktop.Controls
             if (Focused && ShowFocusCues)
             {
                 using var ringPath = Theme.RoundedRect(Rectangle.Inflate(body, -1, -1), Math.Max(2, radius - 1));
-                using var ringPen = new Pen(_active ? Color.White : Theme.ACCENT, 2f);
+                using var ringPen = new Pen(Theme.ACCENT_LIGHT, 2f);
                 g.DrawPath(ringPen, ringPath);
             }
         }
@@ -570,7 +656,7 @@ namespace DepupOfficeDesktop.Controls
             Input = new TextBox
             {
                 BorderStyle = BorderStyle.None,
-                BackColor = Theme.SURFACE,
+                BackColor = Theme.SURFACE2,
                 ForeColor = Theme.TEXT,
                 Font = Theme.FontBody(10.5f)
             };
@@ -579,8 +665,8 @@ namespace DepupOfficeDesktop.Controls
             Controls.Add(Input);
         }
 
-        private int IconZone => Theme.S(46);
-        private int ShortcutZone => string.IsNullOrEmpty(Shortcut) || Width < Theme.S(260) ? Theme.S(14) : Theme.S(76);
+        private int IconZone => Theme.S(32);
+        private int ShortcutZone => string.IsNullOrEmpty(Shortcut) || Width < Theme.S(238) ? Theme.S(8) : Theme.S(58);
 
         protected override void OnLayout(LayoutEventArgs levent)
         {
@@ -597,14 +683,14 @@ namespace DepupOfficeDesktop.Controls
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
             if (rect.Width <= 0 || rect.Height <= 0) return;
-            using var path = Theme.RoundedRect(rect, rect.Height / 2);   // pil penuh seperti kolom cari Android
-            using (var b = new SolidBrush(Theme.SURFACE)) g.FillPath(b, path);
+            using var path = Theme.RoundedRect(rect, Theme.S(8));
+            using (var b = new SolidBrush(Theme.SURFACE2)) g.FillPath(b, path);
             using (var pen = new Pen(Input.Focused ? Theme.ACCENT : Theme.LINE, Input.Focused ? 2f : 1f))
                 g.DrawPath(pen, path);
 
             // ikon kaca pembesar
-            float s = Theme.Scale, cx = Theme.S(24), cy = Height / 2f;
-            using var ip = new Pen(Theme.TEXT, 1.7f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            float s = Theme.Scale, cx = Theme.S(17), cy = Height / 2f;
+            using var ip = new Pen(Theme.MUTED, 1.6f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             g.DrawEllipse(ip, cx - 6 * s, cy - 6 * s, 11 * s, 11 * s);
             g.DrawLine(ip, cx + 3.5f * s, cy + 3.5f * s, cx + 7.5f * s, cy + 7.5f * s);
 
@@ -614,8 +700,8 @@ namespace DepupOfficeDesktop.Controls
                 var f = Theme.FontMono(8f);
                 var sz = TextRenderer.MeasureText(Shortcut, f, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
                 var kr = new Rectangle(Width - Theme.S(12) - sz.Width - Theme.S(12), (Height - sz.Height - Theme.S(8)) / 2, sz.Width + Theme.S(12), sz.Height + Theme.S(8));
-                using var kp = Theme.RoundedRect(kr, kr.Height / 2);
-                using (var kb = new SolidBrush(Theme.SURFACE2)) g.FillPath(kb, kp);
+                using var kp = Theme.RoundedRect(kr, Theme.S(4));
+                using (var kb = new SolidBrush(Theme.SURFACE)) g.FillPath(kb, kp);
                 TextRenderer.DrawText(g, Shortcut, f, kr, Theme.MUTED, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
         }
@@ -707,9 +793,10 @@ namespace DepupOfficeDesktop.Controls
             try { ButtonRenderer.DrawParentBackground(g, ClientRectangle, this); }
             catch { g.Clear(Parent?.BackColor ?? Theme.BG); }
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            var r = new RectangleF(0.5f, 0.5f, Width - 2f, Height - 2f);
-            using (var b = new SolidBrush(_hover ? Theme.SURFACE2 : Theme.SURFACE)) g.FillEllipse(b, r);
-            using (var p = new Pen(Theme.LINE)) g.DrawEllipse(p, r);
+            var r = new Rectangle(0, 0, Width - 1, Height - 1);
+            using var shape = Theme.RoundedRect(r, Theme.S(8));
+            if (_hover || _down)
+                using (var b = new SolidBrush(Theme.SURFACE2)) g.FillPath(b, shape);
 
             float s = Theme.Scale * Math.Min(Width, Height) / (44f * Theme.Scale), cx = Width / 2f, cy = Height / 2f;
             using var pen = new Pen(Theme.TEXT, 1.7f * Theme.Scale) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
@@ -829,7 +916,7 @@ namespace DepupOfficeDesktop.Controls
             Font = Theme.FontLabel(9.5f);
             Cursor = Cursors.Hand;
             TabStop = true;
-            Height = Theme.S(42);
+            Height = Theme.S(36);
         }
 
         private RectangleF Slot(int i)
@@ -864,7 +951,7 @@ namespace DepupOfficeDesktop.Controls
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
             if (rect.Width <= 0 || rect.Height <= 0) return;
-            using (var track = Theme.RoundedRect(rect, rect.Height / 2))
+            using (var track = Theme.RoundedRect(rect, Theme.S(9)))
             using (var b = new SolidBrush(Theme.SURFACE2))
                 g.FillPath(b, track);
             for (int i = 0; i < _items.Length; i++)
@@ -872,7 +959,7 @@ namespace DepupOfficeDesktop.Controls
                 var r = Rectangle.Round(Slot(i));
                 if (i == _sel)
                 {
-                    using var thumb = Theme.RoundedRect(r, r.Height / 2);
+                    using var thumb = Theme.RoundedRect(r, Theme.S(6));
                     using var tb = new SolidBrush(Theme.Dark ? Theme.SURFACE3 : Theme.SURFACE);
                     g.FillPath(tb, thumb);
                     if (Focused && ShowFocusCues)
@@ -880,7 +967,7 @@ namespace DepupOfficeDesktop.Controls
                 }
                 else if (i == _hover)
                 {
-                    using var hp = Theme.RoundedRect(r, r.Height / 2);
+                    using var hp = Theme.RoundedRect(r, Theme.S(6));
                     using var hb = new SolidBrush(Theme.SURFACE3);
                     g.FillPath(hb, hp);
                 }

@@ -17,7 +17,7 @@ namespace DepupOfficeDesktop.Forms
     //  MODEL OBJEK EDIT (semua koordinat dalam piksel bitmap halaman)
     // =====================================================================
 
-    internal enum EditTool { Select, Text, EditText, Highlight, Whiteout, Box }
+    internal enum EditTool { Select, Text, EditText, Highlight, Whiteout, Box, Pen }
 
     internal abstract class EditObj
     {
@@ -96,6 +96,29 @@ namespace DepupOfficeDesktop.Forms
         }
     }
 
+    internal sealed class StrokeObj(PointF[] normalized, Color ink, float width) : EditObj
+    {
+        public override void Draw(Graphics g)
+        {
+            var points = new PointF[normalized.Length];
+            for (int i = 0; i < points.Length; i++)
+                points[i] = new PointF(Bounds.Left + normalized[i].X * Bounds.Width, Bounds.Top + normalized[i].Y * Bounds.Height);
+            DrawPoints(g, points, ink, width);
+        }
+
+        public static void DrawPoints(Graphics graphics, PointF[] points, Color ink, float width)
+        {
+            if (points.Length == 1)
+            {
+                using var fill = new SolidBrush(ink);
+                graphics.FillEllipse(fill, points[0].X - width / 2, points[0].Y - width / 2, width, width);
+                return;
+            }
+            using var pen = new Pen(ink, width) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+            graphics.DrawLines(pen, points);
+        }
+    }
+
     // =====================================================================
     //  KANVAS HALAMAN
     // =====================================================================
@@ -113,12 +136,16 @@ namespace DepupOfficeDesktop.Forms
         public event Action? Changed;                  // dipanggil SESUDAH objek berubah
         public event Action<PointF>? PointClicked;     // alat Teks / Edit Teks Asli
         public event Action<RectangleF>? RectDrawn;    // alat Sorot / Tutup / Kotak
+        public event Action<PointF[]>? StrokeDrawn;
+        public Color PenColor = Color.Black;
+        public float PenWidth = 4f;
 
         private bool _moving, _resizing, _drawing, _undoPushed;
         private PointF _dragStart, _dragCur;
         private RectangleF _origBounds;
         private TextBox? _editor;
         private TextObj? _editing;
+        private List<PointF>? _stroke;
 
         public bool IsEditing => _editor != null;
 
@@ -248,6 +275,7 @@ namespace DepupOfficeDesktop.Forms
                 if (ReferenceEquals(o, _editing)) continue;
                 o.Draw(g);
             }
+            if (_stroke is { Count: > 0 }) StrokeObj.DrawPoints(g, _stroke.ToArray(), PenColor, PenWidth);
             g.Restore(state);
 
             if (Selected != null && Objects.Contains(Selected))
@@ -302,6 +330,12 @@ namespace DepupOfficeDesktop.Forms
                     PointClicked?.Invoke(pt);
                     break;
 
+                case EditTool.Pen:
+                    _stroke = new List<PointF> { pt };
+                    Capture = true;
+                    Invalidate();
+                    break;
+
                 default:
                     _drawing = true;
                     _dragStart = pt;
@@ -316,6 +350,16 @@ namespace DepupOfficeDesktop.Forms
             if (Page == null) return;
             var pt = new PointF(e.X / Zoom, e.Y / Zoom);
 
+            if (_stroke != null)
+            {
+                var last = _stroke[^1];
+                if (_stroke.Count < 16000 && (Math.Abs(last.X - pt.X) >= 0.8f || Math.Abs(last.Y - pt.Y) >= 0.8f))
+                {
+                    _stroke.Add(new PointF(Math.Clamp(pt.X, 0, Page.Width), Math.Clamp(pt.Y, 0, Page.Height)));
+                    Invalidate();
+                }
+                return;
+            }
             if ((_moving || _resizing) && Selected != null)
             {
                 float dx = pt.X - _dragStart.X, dy = pt.Y - _dragStart.Y;
@@ -362,6 +406,15 @@ namespace DepupOfficeDesktop.Forms
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (_stroke != null)
+            {
+                var points = _stroke.ToArray();
+                _stroke = null;
+                Capture = false;
+                StrokeDrawn?.Invoke(points);
+                Invalidate();
+                return;
+            }
             if (_drawing)
             {
                 _drawing = false;
@@ -441,7 +494,7 @@ namespace DepupOfficeDesktop.Forms
 
         private static int S(int px) => Theme.S(px);
 
-        public PdfEditorForm(string path)
+        public PdfEditorForm(string path, IWin32Window? owner = null, bool annotate = false)
         {
             _src = path;
             Text = $"Editor PDF — {Path.GetFileName(path)}";
@@ -451,7 +504,7 @@ namespace DepupOfficeDesktop.Forms
             BackColor = Theme.BG;
             KeyPreview = true;
 
-            LoadSource();
+            LoadSource(owner);
             if (_pages.Count == 0) return;
 
             _objs = new List<EditObj>[_pages.Count];
@@ -459,40 +512,40 @@ namespace DepupOfficeDesktop.Forms
             _ocr = new OcrPage?[_pages.Count];
 
             BuildUi();
-            Shown += (s, e) => { FitWidth(); GoTo(0); };
+            Shown += (s, e) => { FitWidth(); GoTo(0); if (annotate) SetTool(EditTool.Pen); };
         }
 
         // ---------- muat berkas ----------
-        private void LoadSource()
+        private void LoadSource(IWin32Window? owner)
         {
             try
             {
                 string ext = Path.GetExtension(_src).ToLowerInvariant();
                 if (ext == ".pdf")
                 {
-                    if (!PdfEngine.EnsureUnlocked(null, _src) || PdfEngine.IsLocked(_src))
-                    {
-                        MessageBox.Show("PDF ini terkunci password dan belum bisa dibuka.", "Editor PDF", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return;
-                    }
-                    int count = PdfEngine.PageCount(_src);
+                    if (!PdfEngine.EnsureUnlocked(owner, _src)) return;
+                    var (read, count) = Ui.Busy(owner, "Memeriksa halaman PDF…", _ => PdfRenderer.PageCount(_src));
+                    if (!read) return;
                     if (count > 80 &&
-                        MessageBox.Show($"PDF ini {count} halaman. Mengedit PDF sebesar ini butuh banyak memori. Lanjutkan?",
+                        MessageBox.Show(owner, $"PDF ini memiliki {count} halaman. Lanjutkan membuka seluruh halaman di editor?",
                             "Editor PDF", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                         return;
                     int maxDim = count > 40 ? 1600 : 2000;
-                    _pages.AddRange(PdfEngine.RenderAllPages(_src, maxDim));
+                    var (loaded, pages) = Ui.Busy(owner, "Menyiapkan halaman editor PDF…", _ =>
+                        PdfEngine.RenderAllPages(_src, PdfEngine.BudgetDim(_src, maxDim, 480, 512L << 20)));
+                    if (!loaded) return;
+                    _pages.AddRange(pages!);
                 }
                 else
                 {
                     _pages.Add(PdfEngine.Decode(_src, 2000));
                 }
                 if (_pages.Count == 0)
-                    MessageBox.Show("Tidak ada halaman yang bisa dimuat dari berkas ini.", "Editor PDF", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(owner, "Tidak ada halaman yang bisa dimuat dari berkas ini.", "Editor PDF", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Gagal membuka berkas: " + ex.Message, "Editor PDF", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(owner, "Gagal membuka berkas: " + ex.Message, "Editor PDF", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -546,6 +599,7 @@ namespace DepupOfficeDesktop.Forms
             bar2.Controls.Add(Btn("🖼 Gambar", false, Theme.ACCENT, InsertImage));
             bar2.Controls.Add(Btn("✍️ Tanda Tangan", false, Theme.TEAL, InsertSignature));
             AddTool(EditTool.Highlight, "🟨 Sorot");
+            AddTool(EditTool.Pen, "Pena");
             AddTool(EditTool.Whiteout, "⬜ Tutup/Hapus");
             AddTool(EditTool.Box, "▭ Kotak");
             _btnDelete = Btn("🗑 Hapus Objek", false, Theme.RED, () => _canvas.DeleteSelected());
@@ -595,7 +649,8 @@ namespace DepupOfficeDesktop.Forms
                 {
                     _ink = cd.Color;
                     _btnColor.BackColor = _ink;
-                    ApplyTextProps();
+                    _canvas.PenColor = _ink;
+                    if (_canvas.Tool != EditTool.Pen) ApplyTextProps();
                 }
             };
 
@@ -643,6 +698,7 @@ namespace DepupOfficeDesktop.Forms
             _canvas.Changed += OnObjectsChanged;
             _canvas.PointClicked += OnCanvasPointClicked;
             _canvas.RectDrawn += OnRectDrawn;
+            _canvas.StrokeDrawn += OnStrokeDrawn;
 
             _status = new Label
             {
@@ -774,6 +830,12 @@ namespace DepupOfficeDesktop.Forms
         {
             _canvas.EndEdit(true);
             _canvas.Tool = t;
+            _canvas.PenColor = _ink;
+            if (t == EditTool.Pen)
+            {
+                _canvas.SelectObject(null);
+                _canvas.PenWidth = Math.Max(2f, _pages[Math.Max(0, _cur)].Width / 350f);
+            }
             foreach (var kv in _toolButtons)
             {
                 bool on = kv.Key == t;
@@ -956,6 +1018,22 @@ namespace DepupOfficeDesktop.Forms
             }
             _objs[_cur].Add(ro);
             _canvas.SelectObject(ro);
+            OnObjectsChanged();
+        }
+
+        private void OnStrokeDrawn(PointF[] points)
+        {
+            if (_cur < 0 || points.Length == 0) return;
+            float left = points.Min(point => point.X), top = points.Min(point => point.Y);
+            float width = Math.Max(1, points.Max(point => point.X) - left);
+            float height = Math.Max(1, points.Max(point => point.Y) - top);
+            for (int index = 0; index < points.Length; index++)
+                points[index] = new PointF((points[index].X - left) / width, (points[index].Y - top) / height);
+            PushUndo();
+            _objs[_cur].Add(new StrokeObj(points, _canvas.PenColor, _canvas.PenWidth)
+            {
+                Bounds = new RectangleF(left, top, width, height)
+            });
             OnObjectsChanged();
         }
 
@@ -1215,6 +1293,7 @@ namespace DepupOfficeDesktop.Forms
             if (!AskExportOptions(out bool wantOcr, out int quality)) return;
 
             string outPath = AppStorage.NamedOut("Edit_" + AppStorage.BaseName(_src), "pdf");
+            string temp = outPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             string oldTitle = Text;
             _exporting = true;
             Enabled = false;
@@ -1222,7 +1301,7 @@ namespace DepupOfficeDesktop.Forms
             try
             {
                 int n = _pages.Count;
-                using (var w = new PdfWriter(outPath, n))
+                using (var w = new PdfWriter(temp, n))
                 {
                     for (int i = 0; i < n; i++)
                     {
@@ -1241,11 +1320,12 @@ namespace DepupOfficeDesktop.Forms
                     }
                     w.Finish();
                 }
+                File.Move(temp, outPath, overwrite: false);
                 success = true;
             }
             catch (Exception ex)
             {
-                try { if (File.Exists(outPath)) File.Delete(outPath); } catch { }
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
                 MessageBox.Show(this, "Gagal menyimpan PDF: " + ex.Message, "Simpan PDF", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally

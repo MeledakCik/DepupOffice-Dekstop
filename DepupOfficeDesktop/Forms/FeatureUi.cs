@@ -33,11 +33,15 @@ namespace DepupOfficeDesktop.Forms
             KeyPreview = true;
             KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Close(); };
             var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
-            int w = Math.Min(S(width), wa.Width - S(40));
-            _innerW = w - S(48) - SystemInformation.VerticalScrollBarWidth;
+            int w = Math.Max(1, Math.Min(S(width), wa.Width - S(40)));
+            _innerW = Math.Max(1, w - S(48) - SystemInformation.VerticalScrollBarWidth);
 
-            var head = new Panel { Dock = DockStyle.Top, Height = S(70), BackColor = Theme.SURFACE, Padding = new Padding(S(20), S(10), S(20), S(6)) };
-            head.Controls.Add(new Label { UseMnemonic = false, Text = subtitle, Font = Theme.FontBody(9.5f), ForeColor = Theme.MUTED, Dock = DockStyle.Top, Height = S(22), AutoEllipsis = true });
+            var subtitleFont = Theme.FontBody(9.5f);
+            int subtitleHeight = string.IsNullOrEmpty(subtitle) ? 0 : Math.Min(S(72),
+                TextRenderer.MeasureText(subtitle, subtitleFont, new Size(_innerW, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + S(4));
+            var head = new Panel { Dock = DockStyle.Top, Height = S(54) + subtitleHeight, BackColor = Theme.SURFACE, Padding = new Padding(S(20), S(10), S(20), S(8)) };
+            if (subtitleHeight > 0)
+                head.Controls.Add(new Label { UseMnemonic = false, Text = subtitle, Font = subtitleFont, ForeColor = Theme.MUTED, Dock = DockStyle.Top, Height = subtitleHeight, AutoEllipsis = true });
             head.Controls.Add(new Label { UseMnemonic = false, Text = title, Font = Theme.FontHead(13f), ForeColor = Theme.TEXT, Dock = DockStyle.Top, Height = S(30), AutoEllipsis = true });
 
             Body = new FlowLayoutPanel
@@ -56,24 +60,25 @@ namespace DepupOfficeDesktop.Forms
             Controls.Add(_actions);
             Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Theme.LINE });
             Controls.Add(head);
-            ClientSize = new Size(w, Math.Min(S(maxHeight), wa.Height - S(60)));
-            Shown += (s, e) => FitHeight(maxHeight);
+            ClientSize = new Size(w, Math.Max(1, Math.Min(S(maxHeight), wa.Height - S(60))));
+            Shown += (s, e) => FitHeight(maxHeight, head.Height);
         }
 
         public int InnerWidth => _innerW;
 
-        private void FitHeight(int maxHeight)
+        private void FitHeight(int maxHeight, int headerHeight)
         {
             int content = Body.Controls.Cast<Control>().Sum(c => c.Height + c.Margin.Vertical) + Body.Padding.Vertical + S(8);
-            int want = S(70) + content + _actions.Height;
+            int want = headerHeight + content + _actions.Height;
             var wa = Screen.FromControl(this).WorkingArea;
-            ClientSize = new Size(ClientSize.Width, Math.Clamp(want, S(220), Math.Min(S(maxHeight), wa.Height - S(60))));
+            int limit = Math.Max(1, Math.Min(S(maxHeight), wa.Height - S(60)));
+            ClientSize = new Size(ClientSize.Width, Math.Clamp(want, Math.Min(S(220), limit), limit));
             if (Bottom > wa.Bottom) Top = Math.Max(wa.Top, wa.Bottom - Height);
         }
 
         public T Add<T>(T c, int top = 0) where T : Control
         {
-            if (c.Width < _innerW && !(c is CheckBox) && !(c is Button)) c.Width = _innerW;
+            if (c is not (CheckBox or Button)) c.Width = _innerW;
             c.Margin = new Padding(0, S(top), 0, S(6));
             Body.Controls.Add(c);
             return c;
@@ -190,7 +195,7 @@ namespace DepupOfficeDesktop.Forms
         /// Jalankan <paramref name="work"/> di latar dengan jendela progres modal. Pengecualian ditampilkan sebagai pesan
         /// yang ramah. Mengembalikan (berhasil, hasil).
         /// </summary>
-        public static (bool ok, T? result) Busy<T>(IWin32Window owner, string message, Func<Action<int, int>, T> work)
+        public static (bool ok, T? result) Busy<T>(IWin32Window? owner, string message, Func<Action<int, int>, T> work)
         {
             using var f = new Form
             {
@@ -201,32 +206,48 @@ namespace DepupOfficeDesktop.Forms
             var bar = new ProgressBar { Location = new Point(S(20), S(52)), Size = new Size(S(380), S(16)), Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30 };
             var sub = new Label { UseMnemonic = false, Text = "Diproses 100% offline di komputer ini…", Font = Theme.FontBody(8.5f), ForeColor = Theme.MUTED, Location = new Point(S(20), S(78)), Size = new Size(S(380), S(20)) };
             f.Controls.AddRange(new Control[] { lbl, bar, sub });
-            T? result = default; Exception? err = null;
+            T? result = default;
+            Exception? err = null;
+            bool done = false;
+            var progressGate = new object();
+            (int Current, int Total) progress = default, shown = default;
             void Progress(int i, int n)
             {
-                if (f.IsDisposed || !f.IsHandleCreated) return;
-                f.BeginInvoke(new Action(() =>
-                {
-                    if (n <= 0) return;
-                    bar.Style = ProgressBarStyle.Continuous; bar.Maximum = n; bar.Value = Math.Clamp(i, 0, n);
-                    sub.Text = $"{i} / {n}";
-                }));
+                lock (progressGate) progress = (i, n);
             }
+            using var timer = new System.Windows.Forms.Timer { Interval = 80 };
+            timer.Tick += (s, e) =>
+            {
+                (int Current, int Total) next;
+                lock (progressGate) next = progress;
+                if (next == shown || next.Total <= 0) return;
+                shown = next;
+                bar.Style = ProgressBarStyle.Continuous;
+                bar.Maximum = next.Total;
+                bar.Value = Math.Clamp(next.Current, 0, next.Total);
+                sub.Text = $"{bar.Value} / {next.Total}";
+            };
+            f.FormClosing += (_, e) => { if (!done && e.CloseReason == CloseReason.UserClosing) e.Cancel = true; };
             f.Shown += async (s, e) =>
             {
+                timer.Start();
                 try { result = await Task.Run(() => work(Progress)); }
                 catch (Exception ex) { err = ex; }
-                f.Close();
+                finally
+                {
+                    done = true;
+                    if (!f.IsDisposed) { timer.Stop(); f.Close(); }
+                }
             };
             f.ShowDialog(owner);
             if (err != null) { ShowError(owner, err); return (false, default); }
-            return (true, result);
+            return (done, result);
         }
 
         public static bool Busy(IWin32Window owner, string message, Action<Action<int, int>> work) =>
             Busy<bool>(owner, message, p => { work(p); return true; }).ok;
 
-        public static void ShowError(IWin32Window owner, Exception ex)
+        public static void ShowError(IWin32Window? owner, Exception ex)
         {
             while (ex is AggregateException ae && ae.InnerException != null) ex = ae.InnerException;
             string msg = ex switch

@@ -1,4 +1,5 @@
 using Depup.Core.Interfaces;
+using PdfSharp;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 

@@ -56,10 +56,13 @@ namespace DepupOfficeDesktop.Core
         public const string MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         public const string MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         public const string MIME_PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-        private static readonly HashSet<string> SupportedDocumentExtensions = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly string[] SupportedDocumentExtensions =
         {
-            ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".jpg", ".jpeg", ".png", ".bmp"
+            ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".txt", ".md", ".jpg", ".jpeg", ".png", ".bmp"
         };
+
+        public static string DocumentPickerFilter { get; } =
+            $"Dokumen yang didukung|{string.Join(";", SupportedDocumentExtensions.Select(extension => "*" + extension))}|Semua berkas (*.*)|*.*";
 
         public static string OutDir { get; private set; } = "";
         public static string PicturesDir { get; private set; } = "";
@@ -104,7 +107,7 @@ namespace DepupOfficeDesktop.Core
         }
 
         public static bool IsSupportedDocument(string filePath)
-            => SupportedDocumentExtensions.Contains(Path.GetExtension(filePath));
+            => SupportedDocumentExtensions.Contains(Path.GetExtension(filePath), StringComparer.OrdinalIgnoreCase);
 
         public static string UnsupportedDocumentMessage(string filePath)
         {
@@ -222,7 +225,7 @@ namespace DepupOfficeDesktop.Core
 
         public static string NewOut(string baseName, string ext)
         {
-            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", CultureInfo.InvariantCulture);
             return Path.Combine(OutDir, $"{baseName}_{stamp}.{ext.TrimStart('.')}");
         }
 
@@ -238,7 +241,8 @@ namespace DepupOfficeDesktop.Core
         public static string? RenameFile(string oldPath, string newName)
         {
             if (!File.Exists(oldPath)) return null;
-            string clean = Regex.Replace(newName.Trim(), @"[\/:*?""<>|]+", "_");
+            oldPath = Path.GetFullPath(oldPath);
+            string clean = string.Join("_", newName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim(' ', '.');
             if (string.IsNullOrWhiteSpace(clean)) return null;
             string ext = Path.GetExtension(oldPath).TrimStart('.');
             string targetName = (string.IsNullOrEmpty(ext) || clean.EndsWith("." + ext, StringComparison.OrdinalIgnoreCase))
@@ -247,8 +251,13 @@ namespace DepupOfficeDesktop.Core
             string newPath = Path.Combine(Path.GetDirectoryName(oldPath) ?? OutDir, targetName);
             try
             {
+                if (string.Equals(oldPath, newPath, StringComparison.Ordinal)) return oldPath;
                 File.Move(oldPath, newPath, false);
-                RemoveRecent(oldPath);
+                Config.RecentFiles.RemoveAll(entry => string.Equals(entry.FilePath, oldPath, StringComparison.OrdinalIgnoreCase));
+                if (Config.Bookmarks.RemoveWhere(path => string.Equals(path, oldPath, StringComparison.OrdinalIgnoreCase)) > 0)
+                    Config.Bookmarks.Add(newPath);
+                if (Config.LastJob is { } last && string.Equals(last.FilePath, oldPath, StringComparison.OrdinalIgnoreCase))
+                    Config.LastJob = new LastJobEntry(last.Title, Path.GetFileName(newPath), newPath);
                 AddRecent(newPath);
                 return newPath;
             }
@@ -258,13 +267,18 @@ namespace DepupOfficeDesktop.Core
             }
         }
 
-        public static List<FileInfo> GetOutFiles()
+        public static List<FileInfo> GetOutFiles(bool includeImages = false)
         {
             try
             {
                 var dir = new DirectoryInfo(OutDir);
                 if (!dir.Exists) return new List<FileInfo>();
-                return dir.GetFiles().OrderByDescending(f => f.LastWriteTimeUtc).ToList();
+                IEnumerable<FileInfo> files = dir.EnumerateFiles().Where(file =>
+                    !file.Name.Equals("privacy.html", StringComparison.OrdinalIgnoreCase) &&
+                    !file.Extension.Equals(".tmp", StringComparison.OrdinalIgnoreCase));
+                if (includeImages && !string.IsNullOrWhiteSpace(PicturesDir) && Directory.Exists(PicturesDir))
+                    files = files.Concat(new DirectoryInfo(PicturesDir).EnumerateFiles().Where(file => MimeByName(file.Name).StartsWith("image/")));
+                return files.OrderByDescending(file => file.LastWriteTimeUtc).ToList();
             }
             catch
             {
@@ -346,22 +360,19 @@ namespace DepupOfficeDesktop.Core
         }
 
         public static bool IsBookmarked(string filePath)
-            => Config.Bookmarks.Contains(filePath);
+            => Config.Bookmarks.Contains(filePath, StringComparer.OrdinalIgnoreCase);
+
+        public static void SetBookmark(string filePath, bool marked)
+        {
+            Config.Bookmarks.RemoveWhere(path => string.Equals(path, filePath, StringComparison.OrdinalIgnoreCase));
+            if (marked) Config.Bookmarks.Add(filePath);
+            SaveConfig();
+        }
 
         public static bool ToggleBookmark(string filePath)
         {
-            bool added;
-            if (Config.Bookmarks.Contains(filePath))
-            {
-                Config.Bookmarks.Remove(filePath);
-                added = false;
-            }
-            else
-            {
-                Config.Bookmarks.Add(filePath);
-                added = true;
-            }
-            SaveConfig();
+            bool added = !IsBookmarked(filePath);
+            SetBookmark(filePath, added);
             return added;
         }
 
@@ -388,10 +399,10 @@ namespace DepupOfficeDesktop.Core
             string dst = Path.Combine(DownloadsDir, Path.GetFileName(srcPath));
             if (File.Exists(dst))
             {
-                string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", CultureInfo.InvariantCulture);
                 dst = Path.Combine(DownloadsDir, $"{Path.GetFileNameWithoutExtension(srcPath)}_{stamp}{Path.GetExtension(srcPath)}");
             }
-            File.Copy(srcPath, dst, true);
+            File.Copy(srcPath, dst, overwrite: false);
             return dst;
         }
     }

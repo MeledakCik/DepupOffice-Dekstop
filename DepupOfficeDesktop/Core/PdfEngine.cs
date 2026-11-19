@@ -126,7 +126,7 @@ namespace DepupOfficeDesktop.Core
         }
 
         /// <summary>
-        /// Resolusi render agar SEMUA halaman (Reader / Slideshow menahan semuanya di memori) muat dalam ±1,2 GB.
+        /// Resolusi render untuk operasi yang masih menahan semua halaman sebagai bitmap.
         /// PDF biasa (≤ ±160 halaman pada 1600px) tetap memakai <paramref name="preferred"/>; PDF ratusan halaman
         /// diturunkan bertahap sampai <paramref name="minDim"/> agar aplikasi tidak kehabisan memori.
         /// </summary>
@@ -396,62 +396,82 @@ namespace DepupOfficeDesktop.Core
             }
         }
 
-        public static void Compress(string pdfPath, int level, string outPath)
+        public static void Compress(string pdfPath, int level, string outPath, Action<int, int>? progress = null)
         {
-            int maxDim = new[] { 1500, 1100, 800 }[Math.Clamp(level, 0, 2)];
-            int q = new[] { 80, 65, 50 }[Math.Clamp(level, 0, 2)];
-            var pages = RenderAllPages(pdfPath, maxDim);
-            try
-            {
-                WriteBitmapsToPdf(pages, outPath, q);
-            }
-            finally
-            {
-                foreach (var b in pages) b.Dispose();
-            }
+            (int Dimension, int Quality)[] levels = [(1500, 80), (1100, 65), (800, 50)];
+            CompressPdf(pdfPath, outPath, [levels[Math.Clamp(level, 0, levels.Length - 1)]], long.MaxValue,
+                preserveIfUnderTarget: false, progress);
         }
 
-        public static void CompressToTarget(string pdfPath, int targetKb, string outPath)
+        public static void CompressToTarget(string pdfPath, int targetKb, string outPath, Action<int, int>? progress = null)
         {
-            long targetBytes = targetKb * 1024L;
-            int[] dims = { 1600, 1300, 1000, 800, 640, 480 };
-            int[] qualities = { 85, 75, 65, 50, 35, 22 };
-
-            for (int idx = 0; idx < dims.Length; idx++)
-            {
-                var pages = RenderAllPages(pdfPath, dims[idx]);
-                try
-                {
-                    WriteBitmapsToPdf(pages, outPath, qualities[idx]);
-                }
-                finally
-                {
-                    foreach (var b in pages) b.Dispose();
-                }
-                var fi = new FileInfo(outPath);
-                if (fi.Exists && (fi.Length <= targetBytes || idx == dims.Length - 1))
-                    break;
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(targetKb);
+            CompressPdf(pdfPath, outPath, [(1600, 85), (1300, 75), (1000, 65), (800, 50), (640, 35), (480, 22)],
+                targetKb * 1024L, preserveIfUnderTarget: true, progress);
         }
 
-        public static int ToJpg(string pdfPath, string baseName)
+        private static void CompressPdf(string pdfPath, string outPath, (int Dimension, int Quality)[] levels,
+            long targetBytes, bool preserveIfUnderTarget, Action<int, int>? progress)
         {
-            var pages = RenderAllPages(pdfPath, 1800);
-            int n = 0;
+            if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
+            {
+                Task.Run(() => CompressPdf(pdfPath, outPath, levels, targetBytes, preserveIfUnderTarget, progress)).GetAwaiter().GetResult();
+                return;
+            }
+            string temp = Path.GetFullPath(outPath) + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                for (int i = 0; i < pages.Count; i++)
+                // The Windows PDF reader is opened once for all compression attempts.
+                using var document = PagedDocument.Open(pdfPath).Document;
+                if (document is not { Count: > 0 }) throw new InvalidDataException("PDF tidak dapat dibuka untuk kompresi.");
+                long originalSize = new FileInfo(pdfPath).Length;
+                if (!preserveIfUnderTarget || originalSize > targetBytes)
                 {
-                    string outFile = Path.Combine(AppStorage.PicturesDir, $"{baseName}_{i + 1}.jpg");
-                    File.WriteAllBytes(outFile, EncodeJpeg(pages[i], 92));
-                    n++;
+                    int total = checked(document.Count * levels.Length);
+                    for (int attempt = 0; attempt < levels.Length; attempt++)
+                    {
+                        var (dimension, quality) = levels[attempt];
+                        using (var writer = new PdfWriter(temp, document.Count))
+                        {
+                            for (int i = 0; i < document.Count; i++)
+                            {
+                                using var bitmap = document.Render(i, dimension);
+                                var size = document.Sizes[i];
+                                float width = size.Width * 0.75f, height = size.Height * 0.75f;
+                                writer.AddPage(EncodeJpeg(bitmap, quality), bitmap.Width, bitmap.Height, width, height, 0, 0, width, height, null);
+                                progress?.Invoke(attempt * document.Count + i + 1, total);
+                            }
+                            writer.Finish();
+                        }
+                        if (new FileInfo(temp).Length <= targetBytes) break;
+                    }
                 }
+                if (!File.Exists(temp) || originalSize <= new FileInfo(temp).Length)
+                    File.Copy(pdfPath, temp, overwrite: true);
+                File.Move(temp, outPath, overwrite: true);
             }
-            finally
+            finally { if (File.Exists(temp)) File.Delete(temp); }
+        }
+
+        public static int ToJpg(string pdfPath, string baseName, Action<int, int>? progress = null)
+        {
+            if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
+                return Task.Run(() => ToJpg(pdfPath, baseName, progress)).GetAwaiter().GetResult();
+            using var document = PagedDocument.Open(pdfPath).Document;
+            if (document is not { Count: > 0 }) throw new InvalidDataException("PDF tidak dapat dibuka untuk ekspor gambar.");
+            for (int index = 0; index < document.Count; index++)
             {
-                foreach (var b in pages) b.Dispose();
+                using var bitmap = document.Render(index, 1800);
+                string pageName = $"{baseName}_{index + 1}";
+                string outFile = Path.Combine(AppStorage.PicturesDir, pageName + ".jpg");
+                if (File.Exists(outFile))
+                    outFile = Path.Combine(AppStorage.PicturesDir, $"{pageName}_{DateTime.Now:yyyyMMdd_HHmmss_fff}.jpg");
+                var jpeg = EncodeJpeg(bitmap, 92);
+                using (var output = new FileStream(outFile, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    output.Write(jpeg);
+                progress?.Invoke(index + 1, document.Count);
             }
-            return n;
+            return document.Count;
         }
 
         public static void OrganizePdf(string pdfPath, IReadOnlyList<int> pageOrder, IReadOnlyDictionary<int, int> rotations, string outPath)
@@ -479,8 +499,8 @@ namespace DepupOfficeDesktop.Core
             }
         }
 
-        public static int ExtractImagesFromPdf(string pdfPath, string baseName)
-            => ToJpg(pdfPath, $"{baseName}_foto");
+        public static int ExtractImagesFromPdf(string pdfPath, string baseName, Action<int, int>? progress = null)
+            => ToJpg(pdfPath, $"{baseName}_foto", progress);
 
         public static (int Count, long SavedBytes) CompressGalleryImages(IReadOnlyList<string> imagePaths, int targetMaxDim, int quality)
         {
@@ -501,7 +521,7 @@ namespace DepupOfficeDesktop.Core
             return (count, savedBytes);
         }
 
-        public static int BatchImagesToIndividualPdf(IReadOnlyList<string> imagePaths)
+        public static int BatchImagesToIndividualPdf(IReadOnlyList<string> imagePaths, Action<int, int>? progress = null)
         {
             int count = 0;
             foreach (string path in imagePaths)
@@ -511,24 +531,23 @@ namespace DepupOfficeDesktop.Core
                 string outPdf = AppStorage.NamedOut($"Batch_{baseName}", "pdf");
                 ImagesToPdf(new[] { path }, outPdf, mode: 0);
                 count++;
+                progress?.Invoke(count, imagePaths.Count);
             }
             return count;
         }
 
-        public static void ImagesToPdf(IReadOnlyList<string> imagePaths, string outPath, int mode = 0)
+        public static void ImagesToPdf(IReadOnlyList<string> imagePaths, string outPath, int mode = 0, Action<int, int>? progress = null)
         {
-            var pages = new List<Bitmap>();
+            ArgumentOutOfRangeException.ThrowIfZero(imagePaths.Count);
+            string temp = Path.GetFullPath(outPath) + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                foreach (string p in imagePaths)
+                using var w = new PdfWriter(temp, imagePaths.Count, null);
+                for (int index = 0; index < imagePaths.Count; index++)
                 {
-                    using var raw = Decode(p, 1600);
-                    Bitmap filtered = ApplyMode((Bitmap)raw.Clone(), mode);
-                    pages.Add(filtered);
-                }
-                using var w = new PdfWriter(outPath, pages.Count, null);
-                foreach (var bmp in pages)
-                {
+                    using var raw = Decode(imagePaths[index], 1600);
+                    using var filtered = mode == 0 ? null : ApplyMode((Bitmap)raw.Clone(), mode);
+                    var bmp = filtered ?? raw;
                     bool land = bmp.Width > bmp.Height;
                     float pw = land ? 842f : 595f;
                     float ph = land ? 595f : 842f;
@@ -540,13 +559,12 @@ namespace DepupOfficeDesktop.Core
                     float t = (ph - dh) / 2f;
                     byte[] jp = EncodeJpeg(bmp, 85);
                     w.AddPage(jp, bmp.Width, bmp.Height, pw, ph, l, t, dw, dh, null);
+                    progress?.Invoke(index + 1, imagePaths.Count);
                 }
                 w.Finish();
+                File.Move(temp, outPath, overwrite: true);
             }
-            finally
-            {
-                foreach (var b in pages) b.Dispose();
-            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
         }
 
         public static void TextToPdf(string content, string outPath)
@@ -609,36 +627,20 @@ namespace DepupOfficeDesktop.Core
         public static ReceiptInfo ParseReceipt(string ocrText)
         {
             var lines = ocrText.Replace("\r\n", "\n").Split('\n').Select(l => l.Trim()).Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
-            string merchant = lines.Count > 0 ? lines[0] : "Toko / Merchant";
-            if (merchant.Length < 3 && lines.Count > 1) merchant = lines[1];
+            string merchant = lines.FirstOrDefault(line => line.Any(char.IsLetter)) ?? "";
+            var dateExpression = new Regex(@"(?i)\b(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{1,2}\s+(jan|feb|mar|apr|mei|jun|jul|agu|sep|okt|nov|des)\w*\s+\d{2,4})\b");
+            string date = lines.Select(line => dateExpression.Match(line)).FirstOrDefault(match => match.Success)?.Value ?? "";
 
-            string date = "";
-            var dateRegex = new Regex(@"(?i)(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}|\d{1,2}\s+(jan|feb|mar|apr|mei|jun|jul|agu|sep|okt|nov|des)\w*\s+\d{2,4})");
-            foreach (string l in lines)
-            {
-                var m = dateRegex.Match(l);
-                if (m.Success) { date = m.Value; break; }
-            }
-            if (string.IsNullOrWhiteSpace(date))
-                date = DateTime.Now.ToString("dd/MM/yyyy", new CultureInfo("id-ID"));
+            const string amount = @"\s*[:=]?\s*(?:Rp\.?\s*)?([\d](?:[\d.,]*\d)?)\s*$";
+            var paymentTotal = new Regex(@"(?i)^\s*(?:grand\s+total|total\s+(?:bayar|pembayaran|belanja|akhir)|jumlah\s+bayar)" + amount);
+            var generalTotal = new Regex(@"(?i)^\s*(?:total|jumlah)" + amount);
+            string FindTotal(Regex expression) => lines.AsEnumerable().Reverse().Select(line => expression.Match(line))
+                .FirstOrDefault(match => match.Success)?.Groups[1].Value ?? "";
+            string total = FindTotal(paymentTotal);
+            if (total.Length == 0) total = FindTotal(generalTotal);
 
-            string total = "";
-            var totalRegex = new Regex(@"(?i)(total|grand total|bayar|jumlah|rp)\s*[:=]?\s*(rp)?\s*([\d.,]{3,15})");
-            for (int i = lines.Count - 1; i >= 0; i--)
-            {
-                var m = totalRegex.Match(lines[i]);
-                if (m.Success)
-                {
-                    total = m.Groups[3].Value;
-                    if (string.IsNullOrWhiteSpace(total)) total = m.Value;
-                    break;
-                }
-            }
-            if (string.IsNullOrWhiteSpace(total)) total = "Rp 0";
-
-            var items = lines.Where(l => !l.Contains(merchant, StringComparison.OrdinalIgnoreCase) &&
-                                         !l.Contains("total", StringComparison.OrdinalIgnoreCase))
-                             .Take(8).ToList();
+            var items = lines.Where(line => line != merchant && !dateExpression.IsMatch(line) &&
+                !paymentTotal.IsMatch(line) && !generalTotal.IsMatch(line)).ToList();
             return new ReceiptInfo(merchant, date, total, items);
         }
 
@@ -735,6 +737,22 @@ namespace DepupOfficeDesktop.Core
         {
             using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var raw = new Bitmap(fs);
+            const int orientationTag = 0x0112;
+            if (raw.PropertyIdList.Contains(orientationTag) && raw.GetPropertyItem(orientationTag)?.Value is { Length: >= 2 } orientation)
+            {
+                var transform = BitConverter.ToUInt16(orientation) switch
+                {
+                    2 => RotateFlipType.RotateNoneFlipX,
+                    3 => RotateFlipType.Rotate180FlipNone,
+                    4 => RotateFlipType.RotateNoneFlipY,
+                    5 => RotateFlipType.Rotate90FlipX,
+                    6 => RotateFlipType.Rotate90FlipNone,
+                    7 => RotateFlipType.Rotate270FlipX,
+                    8 => RotateFlipType.Rotate270FlipNone,
+                    _ => RotateFlipType.RotateNoneFlipNone
+                };
+                if (transform != RotateFlipType.RotateNoneFlipNone) raw.RotateFlip(transform);
+            }
             float f = Math.Min(1f, (float)maxDim / Math.Max(raw.Width, raw.Height));
             int w = Math.Max(1, (int)(raw.Width * f));
             int h = Math.Max(1, (int)(raw.Height * f));
@@ -752,104 +770,107 @@ namespace DepupOfficeDesktop.Core
         /// </summary>
         public static Bitmap ToDocument(Bitmap src)
         {
-            int w = src.Width, h = src.Height;
-            int[] g = new int[w * h];
-            for (int y = 0; y < h; y++)
+            int width = src.Width, height = src.Height;
+            int stride = width + 1;
+            var luminance = new byte[checked(width * height)];
+            var integral = new long[checked(stride * (height + 1))];
+            var row = new byte[checked(width * 4)];
+            var bounds = new Rectangle(0, 0, width, height);
+            var input = src.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
             {
-                for (int x = 0; x < w; x++)
+                for (int y = 0; y < height; y++)
                 {
-                    Color c = src.GetPixel(x, y);
-                    g[y * w + x] = (c.R * 299 + c.G * 587 + c.B * 114) / 1000;
+                    System.Runtime.InteropServices.Marshal.Copy(input.Scan0 + y * input.Stride, row, 0, row.Length);
+                    long sum = 0;
+                    for (int x = 0; x < width; x++)
+                    {
+                        int channel = x * 4;
+                        byte value = (byte)((row[channel + 2] * 299 + row[channel + 1] * 587 + row[channel] * 114) / 1000);
+                        luminance[y * width + x] = value;
+                        sum += value;
+                        integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + sum;
+                    }
                 }
             }
+            finally { src.UnlockBits(input); }
 
-            int iw = w + 1;
-            long[] integ = new long[iw * (h + 1)];
-            for (int y = 0; y < h; y++)
+            int radius = Math.Max(8, Math.Max(width, height) / 32);
+            var result = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            try
             {
-                long row = 0;
-                for (int x = 0; x < w; x++)
+                var output = result.LockBits(bounds, ImageLockMode.WriteOnly, result.PixelFormat);
+                try
                 {
-                    row += g[y * w + x];
-                    integ[(y + 1) * iw + x + 1] = integ[y * iw + x + 1] + row;
+                    for (int y = 0; y < height; y++)
+                    {
+                        int top = Math.Max(0, y - radius), bottom = Math.Min(height, y + radius + 1);
+                        for (int x = 0; x < width; x++)
+                        {
+                            int left = Math.Max(0, x - radius), right = Math.Min(width, x + radius + 1);
+                            long sum = integral[bottom * stride + right] - integral[top * stride + right]
+                                - integral[bottom * stride + left] + integral[top * stride + left];
+                            long mean = sum / ((bottom - top) * (right - left));
+                            byte value = luminance[y * width + x] * 100 < mean * 92 ? (byte)0 : (byte)255;
+                            int channel = x * 4;
+                            row[channel] = row[channel + 1] = row[channel + 2] = value;
+                            row[channel + 3] = 255;
+                        }
+                        System.Runtime.InteropServices.Marshal.Copy(row, 0, output.Scan0 + y * output.Stride, row.Length);
+                    }
                 }
+                finally { result.UnlockBits(output); }
+                return result;
             }
-
-            int r = Math.Max(8, Math.Max(w, h) / 32);
-            var outBmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            for (int y = 0; y < h; y++)
+            catch
             {
-                int y0 = Math.Max(0, y - r);
-                int y1 = Math.Min(h, y + r + 1);
-                for (int x = 0; x < w; x++)
-                {
-                    int x0 = Math.Max(0, x - r);
-                    int x1 = Math.Min(w, x + r + 1);
-                    long sum = integ[y1 * iw + x1] - integ[y0 * iw + x1] - integ[y1 * iw + x0] + integ[y0 * iw + x0];
-                    long mean = sum / ((y1 - y0) * (x1 - x0));
-                    bool isBlack = g[y * w + x] * 100 < mean * 92;
-                    outBmp.SetPixel(x, y, isBlack ? Color.Black : Color.White);
-                }
+                result.Dispose();
+                throw;
             }
-            return outBmp;
         }
 
         public static Bitmap ApplyMode(Bitmap raw, int mode)
         {
             if (mode == 2)
             {
-                var docBmp = ToDocument(raw);
-                raw.Dispose();
-                return docBmp;
+                using (raw) return ToDocument(raw);
             }
             if (mode == 0) return raw;
 
-            int w = raw.Width, h = raw.Height;
-            var outBmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            for (int y = 0; y < h; y++)
+            var matrix = new ColorMatrix();
+            if (mode == 1)
             {
-                for (int x = 0; x < w; x++)
-                {
-                    Color c = raw.GetPixel(x, y);
-                    if (mode == 1)
-                    {
-                        int luma = (c.R * 299 + c.G * 587 + c.B * 114) / 1000;
-                        outBmp.SetPixel(x, y, Color.FromArgb(c.A, luma, luma, luma));
-                    }
-                    else
-                    {
-                        // Mode 3: Magic Color (kontras 1.25x, offset -25, saturasi 1.15x)
-                        int r = Math.Clamp((int)(c.R * 1.25f - 25f), 0, 255);
-                        int g = Math.Clamp((int)(c.G * 1.25f - 25f), 0, 255);
-                        int b = Math.Clamp((int)(c.B * 1.25f - 25f), 0, 255);
-                        outBmp.SetPixel(x, y, Color.FromArgb(c.A, r, g, b));
-                    }
-                }
+                matrix.Matrix00 = matrix.Matrix01 = matrix.Matrix02 = 0.299f;
+                matrix.Matrix10 = matrix.Matrix11 = matrix.Matrix12 = 0.587f;
+                matrix.Matrix20 = matrix.Matrix21 = matrix.Matrix22 = 0.114f;
             }
-            raw.Dispose();
-            return outBmp;
+            else
+            {
+                matrix.Matrix00 = matrix.Matrix11 = matrix.Matrix22 = 1.25f;
+                matrix.Matrix40 = matrix.Matrix41 = matrix.Matrix42 = -25f / 255f;
+            }
+            using (raw) return ApplyColorMatrix(raw, matrix);
         }
 
         public static Bitmap AdjustBrightnessContrast(Bitmap src, int bright, int contrast)
         {
             if (bright == 0 && contrast == 0) return src;
-            int w = src.Width, h = src.Height;
-            var outBmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
             float c = 1f + contrast / 100f;
-            float t = 128f * (1f - c) + bright / 100f * 120f;
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                {
-                    Color col = src.GetPixel(x, y);
-                    int r = Math.Clamp((int)(col.R * c + t), 0, 255);
-                    int g = Math.Clamp((int)(col.G * c + t), 0, 255);
-                    int b = Math.Clamp((int)(col.B * c + t), 0, 255);
-                    outBmp.SetPixel(x, y, Color.FromArgb(col.A, r, g, b));
-                }
-            }
-            src.Dispose();
-            return outBmp;
+            float t = (128f * (1f - c) + bright / 100f * 120f) / 255f;
+            var matrix = new ColorMatrix { Matrix00 = c, Matrix11 = c, Matrix22 = c, Matrix40 = t, Matrix41 = t, Matrix42 = t };
+            using (src) return ApplyColorMatrix(src, matrix);
+        }
+
+        private static Bitmap ApplyColorMatrix(Bitmap source, ColorMatrix matrix)
+        {
+            var result = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+            using var attributes = new ImageAttributes();
+            attributes.SetColorMatrix(matrix);
+            using var graphics = Graphics.FromImage(result);
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.DrawImage(source, new Rectangle(Point.Empty, source.Size), 0, 0,
+                source.Width, source.Height, GraphicsUnit.Pixel, attributes);
+            return result;
         }
 
         public static Bitmap Orient(Bitmap src, int rot, bool flip)
@@ -889,6 +910,9 @@ namespace DepupOfficeDesktop.Core
         }
 
         public static Bitmap RenderScan(ScanPage pg, int maxDim, int bright, int contrast)
+            => ProcessScanPage(pg, 0, maxDim, bright, contrast);
+
+        private static Bitmap RenderScanPixels(ScanPage pg, int maxDim, int bright, int contrast)
         {
             var raw = Decode(pg.FilePath, maxDim);
             var oriented = Orient(raw, pg.Rot, pg.Flip);
@@ -905,23 +929,31 @@ namespace DepupOfficeDesktop.Core
             var cropped = new Bitmap(cw, ch, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(cropped))
             {
+                g.Clear(Color.White);
                 g.DrawImage(rotated, new Rectangle(0, 0, cw, ch), new Rectangle(x, y, cw, ch), GraphicsUnit.Pixel);
             }
             rotated.Dispose();
 
-            var baseBmp = AdjustBrightnessContrast(cropped, bright, contrast);
+            return AdjustBrightnessContrast(cropped, bright, contrast);
+        }
 
-            // Lukis sensur hitam (blackout) jika ada
+        private static void DrawScanOverlays(ScanPage pg, Bitmap baseBmp)
+        {
+            // Coordinates are stored in the full preview, so later cropping cannot shift a redaction.
             if (pg.Redactions.Count > 0)
             {
                 using var g = Graphics.FromImage(baseBmp);
-                foreach (var r in pg.Redactions)
+                foreach (var redaction in pg.Redactions)
                 {
-                    float rx = r.Left * baseBmp.Width;
-                    float ry = r.Top * baseBmp.Height;
-                    float rw = r.Width * baseBmp.Width;
-                    float rh = r.Height * baseBmp.Height;
-                    g.FillRectangle(Brushes.Black, rx, ry, rw, rh);
+                    var rect = RectangleF.Intersect(redaction, pg.Crop);
+                    if (rect.IsEmpty) continue;
+                    float sx = baseBmp.Width / pg.Crop.Width, sy = baseBmp.Height / pg.Crop.Height;
+                    var pixels = Rectangle.FromLTRB(
+                        (int)Math.Floor((rect.Left - pg.Crop.Left) * sx) - 1,
+                        (int)Math.Floor((rect.Top - pg.Crop.Top) * sy) - 1,
+                        (int)Math.Ceiling((rect.Right - pg.Crop.Left) * sx) + 1,
+                        (int)Math.Ceiling((rect.Bottom - pg.Crop.Top) * sy) + 1);
+                    g.FillRectangle(Brushes.Black, pixels);
                 }
             }
 
@@ -935,14 +967,12 @@ namespace DepupOfficeDesktop.Core
                 float fontSize = Math.Max(14f, Math.Min(baseBmp.Width, baseBmp.Height) * 0.06f);
                 using var wmFont = new Font("Segoe UI", fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
                 using var wmBrush = new SolidBrush(Color.FromArgb(95, 220, 38, 38));
-                var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                 g.DrawString(pg.Watermark, wmFont, wmBrush, PointF.Empty, sf);
             }
-
-            return baseBmp;
         }
 
-        public static ScanPage RenderKtpA4(ScanPage frontPg, ScanPage backPg, int maxDim, int bright, int contrast)
+        public static ScanPage RenderKtpA4(ScanPage frontPg, ScanPage backPg, int maxDim, int bright, int contrast, string? outPath = null)
         {
             using var fBmp = RenderScan(frontPg, maxDim, bright, contrast);
             using var bBmp = RenderScan(backPg, maxDim, bright, contrast);
@@ -955,7 +985,7 @@ namespace DepupOfficeDesktop.Core
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
-                var sfCenter = new StringFormat { Alignment = StringAlignment.Center };
+                using var sfCenter = new StringFormat { Alignment = StringAlignment.Center };
                 using var headerFont = new Font("Segoe UI", 36f, FontStyle.Bold, GraphicsUnit.Pixel);
                 using var subFont = new Font("Segoe UI", 22f, FontStyle.Regular, GraphicsUnit.Pixel);
                 using var labelFont = new Font("Segoe UI", 26f, FontStyle.Bold, GraphicsUnit.Pixel);
@@ -991,7 +1021,7 @@ namespace DepupOfficeDesktop.Core
                 g.DrawString("● SISI BELAKANG (BACK)", labelFont, labelBrush, a4W / 2f, bTop + cardH + 25f, sfCenter);
             }
 
-            string ktpPath = Path.Combine(AppStorage.AppDataDir, $"ktp_a4_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.jpg");
+            string ktpPath = outPath ?? Path.Combine(AppStorage.AppDataDir, $"ktp_a4_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.jpg");
             File.WriteAllBytes(ktpPath, EncodeJpeg(page, 92));
             return new ScanPage(ktpPath);
         }
@@ -1043,7 +1073,11 @@ namespace DepupOfficeDesktop.Core
         }
 
         public static Bitmap ProcessScanPage(ScanPage pg, int mode, int maxDim, int bright, int contrast)
-            => ApplyMode(RenderScan(pg, maxDim, bright, contrast), mode);
+        {
+            var result = ApplyMode(RenderScanPixels(pg, maxDim, bright, contrast), mode);
+            DrawScanOverlays(pg, result);
+            return result;
+        }
 
         public static long EstimatePageSize(ScanPage pg, int fmt, int opt, int mode, int bright, int contrast, AspectOpt a, bool ocr)
         {
@@ -1060,19 +1094,20 @@ namespace DepupOfficeDesktop.Core
 
         public static void ExportPdf(
             IReadOnlyList<ScanPage> pages, string outPath, int mode, int bright, int contrast,
-            int opt, AspectOpt a, bool ocr, string? password)
+            int opt, AspectOpt a, bool ocr, string? password, Action<int, int>? progress = null)
         {
             int dim = ocr ? Math.Max(PDF_DIM[Math.Clamp(opt, 0, 2)], OCR_MIN_DIM) : PDF_DIM[Math.Clamp(opt, 0, 2)];
             int q = PDF_Q[Math.Clamp(opt, 0, 2)];
             using var w = new PdfWriter(outPath, pages.Count, password);
             try
             {
-                foreach (var pg in pages)
+                for (int index = 0; index < pages.Count; index++)
                 {
-                    using var lay = LayoutPage(ProcessScanPage(pg, mode, dim, bright, contrast), a);
-                    OcrPage? res = ocr ? RunOcr(lay.Bmp) : null;
+                    using var lay = LayoutPage(ProcessScanPage(pages[index], mode, dim, bright, contrast), a);
+                    OcrPage? res = ocr ? WinOcrRunner.Recognize(lay.Bmp) : null;
                     byte[] jp = EncodeJpeg(lay.Bmp, q);
                     w.AddPage(jp, lay.Bmp.Width, lay.Bmp.Height, lay.PageW, lay.PageH, lay.X, lay.Y, lay.W, lay.H, res);
+                    progress?.Invoke(index + 1, pages.Count);
                 }
                 w.Finish();
             }
@@ -1085,7 +1120,7 @@ namespace DepupOfficeDesktop.Core
 
         public static void ExportDocx(
             IReadOnlyList<ScanPage> pages, string outPath, int mode, int bright, int contrast,
-            bool asImage, AspectOpt a)
+            bool asImage, AspectOpt a, Action<int, int>? progress = null)
         {
             using var d = new DocxWriter(outPath);
             for (int i = 0; i < pages.Count; i++)
@@ -1100,18 +1135,20 @@ namespace DepupOfficeDesktop.Core
                 else
                 {
                     using var bmp = ProcessScanPage(pg, mode, 2000, bright, contrast);
-                    var res = RunOcr(bmp);
+                    var res = WinOcrRunner.Recognize(bmp);
                     if (res.Paras.Count == 0)
                         d.Note($"(Tidak ada teks terdeteksi di halaman {i + 1})");
                     else
                         foreach (string p in res.Paras) d.Paragraph(p);
                 }
+                progress?.Invoke(i + 1, pages.Count);
             }
             d.Finish();
         }
 
         public static int ExportJpg(
-            IReadOnlyList<ScanPage> pages, string baseName, int mode, int bright, int contrast, int opt, AspectOpt a)
+            IReadOnlyList<ScanPage> pages, string baseName, int mode, int bright, int contrast, int opt, AspectOpt a,
+            Action<int, int>? progress = null)
         {
             int n = 0;
             int dim = JPG_DIM[Math.Clamp(opt, 0, 2)];
@@ -1120,8 +1157,13 @@ namespace DepupOfficeDesktop.Core
                 using var lay = LayoutPage(ProcessScanPage(pages[idx], mode, dim, bright, contrast), a);
                 string fileName = pages.Count == 1 ? $"{baseName}.jpg" : $"{baseName}_{idx + 1}.jpg";
                 string dst = Path.Combine(AppStorage.PicturesDir, fileName);
-                File.WriteAllBytes(dst, EncodeJpeg(lay.Bmp, JPG_Q));
+                if (File.Exists(dst))
+                    dst = Path.Combine(AppStorage.PicturesDir, $"{Path.GetFileNameWithoutExtension(fileName)}_{DateTime.Now:yyyyMMdd_HHmmss_fff}.jpg");
+                var jpeg = EncodeJpeg(lay.Bmp, JPG_Q);
+                using (var output = new FileStream(dst, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    output.Write(jpeg);
                 n++;
+                progress?.Invoke(n, pages.Count);
             }
             return n;
         }

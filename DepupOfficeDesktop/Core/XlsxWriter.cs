@@ -22,7 +22,8 @@ namespace DepupOfficeDesktop.Core
             string sheetName,
             IReadOnlyList<IReadOnlyList<string>> rows,
             ISet<int>? boldRows = null,
-            int columnCount = 0)
+            int columnCount = 0,
+            IReadOnlyDictionary<(int Row, int Column), (string Expression, double Value)>? formulas = null)
         {
             boldRows ??= new HashSet<int> { 0 };
             string safeName = string.IsNullOrWhiteSpace(sheetName) ? "Sheet1" : sheetName.Trim();
@@ -48,7 +49,7 @@ namespace DepupOfficeDesktop.Core
             Put("xl/workbook.xml", Workbook(safeName));
             Put("xl/_rels/workbook.xml.rels", WorkbookRels());
             Put("xl/styles.xml", Styles());
-            Put("xl/worksheets/sheet1.xml", Worksheet(rows, boldRows, cols));
+            Put("xl/worksheets/sheet1.xml", Worksheet(rows, boldRows, cols, formulas));
         }
 
         private static string ContentTypes() => XML +
@@ -96,7 +97,8 @@ namespace DepupOfficeDesktop.Core
             "<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>" +
             "</styleSheet>";
 
-        private static string Worksheet(IReadOnlyList<IReadOnlyList<string>> rows, ISet<int> boldRows, int cols)
+        private static string Worksheet(IReadOnlyList<IReadOnlyList<string>> rows, ISet<int> boldRows, int cols,
+            IReadOnlyDictionary<(int Row, int Column), (string Expression, double Value)>? formulas)
         {
             var sb = new StringBuilder();
             sb.Append(XML).Append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
@@ -123,10 +125,17 @@ namespace DepupOfficeDesktop.Core
                 bool bold = boldRows.Contains(r);
                 for (int c = 0; c < cols; c++)
                 {
-                    string raw = (c < row.Count && row[c] != null) ? row[c].Trim() : "";
-                    if (string.IsNullOrEmpty(raw)) continue;
+                    string raw = c < row.Count ? row[c] ?? "" : "";
+                    (string Expression, double Value) formula = default;
+                    bool hasFormula = formulas?.TryGetValue((r, c), out formula) == true;
+                    if (raw.Length == 0 && !hasFormula) continue;
                     string cellRef = $"{ColumnName(c)}{r + 1}";
                     string style = bold ? " s=\"1\"" : "";
+                    if (hasFormula)
+                    {
+                        sb.Append($"<c r=\"{cellRef}\"{style}><f>{Esc(formula.Expression!)}</f><v>{formula.Value.ToString(CultureInfo.InvariantCulture)}</v></c>");
+                        continue;
+                    }
                     double? numeric = ParseNumber(raw);
                     if (numeric.HasValue)
                         sb.Append($"<c r=\"{cellRef}\"{style}><v>{TrimNumber(numeric.Value)}</v></c>");
@@ -163,10 +172,7 @@ namespace DepupOfficeDesktop.Core
             return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out double v) ? v : null;
         }
 
-        private static string TrimNumber(double v)
-            => Math.Abs(v - Math.Round(v)) < 0.0000001
-                ? ((long)Math.Round(v)).ToString(CultureInfo.InvariantCulture)
-                : v.ToString(CultureInfo.InvariantCulture);
+        private static string TrimNumber(double v) => v.ToString("R", CultureInfo.InvariantCulture);
 
         public static string ColumnName(int index)
         {

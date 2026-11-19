@@ -122,7 +122,7 @@ namespace DepupOfficeDesktop.Core
             => val == "0" || string.Equals(val, "false", StringComparison.OrdinalIgnoreCase) || string.Equals(val, "off", StringComparison.OrdinalIgnoreCase);
 
         // ================= XLSX =================
-        public static Sheet? ReadXlsx(string filePath)
+        public static Sheet? ReadXlsx(string filePath, bool preserveFormulas = false)
         {
             var entries = ReadZip(filePath, name =>
                 name == "xl/workbook.xml" ||
@@ -138,7 +138,7 @@ namespace DepupOfficeDesktop.Core
 
             var shared = entries.TryGetValue("xl/sharedStrings.xml", out byte[]? ss) ? ParseSharedStrings(ss) : new List<string>();
             string sheetName = entries.TryGetValue("xl/workbook.xml", out byte[]? wb) ? (ParseSheetName(wb) ?? "Sheet1") : "Sheet1";
-            var rows = ParseWorksheet(entries[sheetEntry], shared);
+            var rows = ParseWorksheet(entries[sheetEntry], shared, preserveFormulas);
             return new Sheet(sheetName, rows, new HashSet<int> { 0 });
         }
 
@@ -194,7 +194,7 @@ namespace DepupOfficeDesktop.Core
             return null;
         }
 
-        private static List<List<string>> ParseWorksheet(byte[] data, List<string> shared)
+        private static List<List<string>> ParseWorksheet(byte[] data, List<string> shared, bool preserveFormulas)
         {
             var cells = new Dictionary<int, Dictionary<int, string>>();
             int maxRow = -1, maxCol = -1;
@@ -204,8 +204,9 @@ namespace DepupOfficeDesktop.Core
                 using var r = XmlReader.Create(ms, new XmlReaderSettings { DtdProcessing = DtdProcessing.Ignore });
                 int row = -1, col = -1;
                 string cellType = "";
-                bool inValue = false, inInline = false;
+                bool inValue = false, inInline = false, inFormula = false;
                 var val = new StringBuilder();
+                var formula = new StringBuilder();
 
                 while (r.Read())
                 {
@@ -224,6 +225,10 @@ namespace DepupOfficeDesktop.Core
                                 string? cellRef = r.GetAttribute("r");
                                 col = cellRef != null ? ColumnIndex(cellRef) : col + 1;
                                 val.Clear();
+                                formula.Clear();
+                                break;
+                            case "f":
+                                inFormula = preserveFormulas && !empty;
                                 break;
                             case "v":
                                 if (!empty) inValue = true;
@@ -236,15 +241,19 @@ namespace DepupOfficeDesktop.Core
                                 break;
                         }
                     }
-                    else if ((r.NodeType == XmlNodeType.Text || r.NodeType == XmlNodeType.Whitespace || r.NodeType == XmlNodeType.SignificantWhitespace) && inValue)
+                    else if (r.NodeType is XmlNodeType.Text or XmlNodeType.Whitespace or XmlNodeType.SignificantWhitespace)
                     {
-                        val.Append(r.Value);
+                        if (inValue) val.Append(r.Value);
+                        else if (inFormula) formula.Append(r.Value);
                     }
                     else if (r.NodeType == XmlNodeType.EndElement)
                     {
                         string local = r.LocalName.ToLowerInvariant();
                         switch (local)
                         {
+                            case "f":
+                                inFormula = false;
+                                break;
                             case "v":
                                 inValue = false;
                                 break;
@@ -260,6 +269,7 @@ namespace DepupOfficeDesktop.Core
                                     string text = val.ToString();
                                     if (cellType == "s" && int.TryParse(text.Trim(), out int sIdx) && sIdx >= 0 && sIdx < shared.Count)
                                         text = shared[sIdx];
+                                    if (formula.Length > 0) text = "=" + formula;
                                     if (!string.IsNullOrEmpty(text))
                                     {
                                         if (!cells.TryGetValue(row, out var rowMap))
@@ -280,6 +290,8 @@ namespace DepupOfficeDesktop.Core
             catch { }
 
             if (maxRow < 0 || maxCol < 0) return new List<List<string>>();
+            if (maxRow >= 1_048_576 || maxCol >= 16_384 || (maxRow + 1L) * (maxCol + 1L) > 2_000_000)
+                throw new InvalidDataException("Rentang spreadsheet terlalu besar untuk dibuka di editor.");
             var outRows = new List<List<string>>(maxRow + 1);
             for (int r = 0; r <= maxRow; r++)
             {
@@ -307,17 +319,26 @@ namespace DepupOfficeDesktop.Core
         // ================= CSV =================
         public static Sheet ReadCsv(string filePath)
         {
-            string text = "";
-            try { text = File.ReadAllText(filePath); } catch { }
-            var firstLines = text.Split('\n').Take(3).ToList();
-            char sep = ',';
-            if (firstLines.Any(l => l.Count(c => c == ';') > l.Count(c => c == ','))) sep = ';';
-            else if (firstLines.Any(l => l.Contains('\t'))) sep = '\t';
-
-            var rows = ParseCsv(text, sep)
-                .Where(row => row.Any(cell => !string.IsNullOrWhiteSpace(cell)))
-                .ToList();
+            string text = File.ReadAllText(filePath);
+            var rows = ParseCsv(text, DetectSeparator(text));
             return new Sheet("Sheet1", rows, new HashSet<int> { 0 });
+        }
+
+        private static char DetectSeparator(string text)
+        {
+            int commas = 0, semicolons = 0, tabs = 0, records = 0;
+            bool quoted = false;
+            foreach (char value in text)
+            {
+                if (value == '"') quoted = !quoted;
+                if (quoted) continue;
+                if (value == ',') commas++;
+                else if (value == ';') semicolons++;
+                else if (value == '\t') tabs++;
+                else if (value == '\n' && ++records >= 5) break;
+            }
+            if (tabs > commas && tabs > semicolons) return '\t';
+            return semicolons > commas ? ';' : ',';
         }
 
         private static List<List<string>> ParseCsv(string text, char sep)
@@ -326,6 +347,7 @@ namespace DepupOfficeDesktop.Core
             var row = new List<string>();
             var cell = new StringBuilder();
             bool quoted = false;
+            bool hasField = false;
             int i = 0;
             while (i < text.Length)
             {
@@ -337,6 +359,7 @@ namespace DepupOfficeDesktop.Core
                 }
                 else if (c == '"')
                 {
+                    hasField = true;
                     quoted = !quoted;
                 }
                 else if (!quoted && c == sep)
@@ -351,6 +374,7 @@ namespace DepupOfficeDesktop.Core
                     cell.Clear();
                     rows.Add(new List<string>(row));
                     row.Clear();
+                    hasField = false;
                 }
                 else
                 {
@@ -358,12 +382,12 @@ namespace DepupOfficeDesktop.Core
                 }
                 i++;
             }
-            if (cell.Length > 0 || row.Count > 0)
+            if (cell.Length > 0 || row.Count > 0 || hasField)
             {
                 row.Add(cell.ToString());
                 rows.Add(new List<string>(row));
             }
-            return rows.Count > 500 ? rows.Take(500).ToList() : rows;
+            return rows;
         }
 
         private static Dictionary<string, byte[]> ReadZip(string filePath, Func<string, bool> wanted)

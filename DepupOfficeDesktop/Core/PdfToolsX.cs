@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace DepupOfficeDesktop.Core
@@ -22,6 +24,7 @@ namespace DepupOfficeDesktop.Core
         /// <summary>Buka PDF memakai password yang sudah dimasukkan pengguna di sesi ini (bila ada).</summary>
         public static PdfFile OpenPdf(string path)
         {
+            if (new FileInfo(path).Length > 400L << 20) throw new InvalidOperationException("Berkas terlalu besar (maks. 400 MB)");
             var bytes = File.ReadAllBytes(path);
             if (bytes.Length > 400L << 20) throw new InvalidOperationException("Berkas terlalu besar (maks. 400 MB)");
             var pw = PdfRenderer.GetCachedPassword(path) ?? "";
@@ -83,7 +86,7 @@ namespace DepupOfficeDesktop.Core
 
         private static void SaveEdited(PdfFile f, string outPath, Action<PdfSave.Ctx> edit)
         {
-            string tmp = outPath + ".tmp";
+            string tmp = outPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 using (var fs = File.Create(tmp)) PdfSave.Write(f, fs, null, edit);
@@ -270,6 +273,173 @@ namespace DepupOfficeDesktop.Core
                 if (i >= 0 && i < pages.Count) comp.AddPage(f, pages[i], rotations.TryGetValue(i, out var r) ? r : 0);
             if (comp.PageCount == 0) throw new InvalidOperationException("Semua halaman telah dihapus");
             comp.Save(outPath);
+        }
+
+        internal static (int Total, int[] Blank) FindBlankPages(string path, Action<int, int>? progress = null)
+        {
+            var source = OpenEditablePdf(path);
+            var pages = source.Pages();
+            using var rendered = PagedDocument.Open(path).Document;
+            if (rendered == null || rendered.Count != pages.Count || rendered.Count == 0)
+                throw new InvalidDataException("Jumlah halaman PDF tidak dapat diverifikasi.");
+            var blank = new List<int>();
+            for (int index = 0; index < pages.Count; index++)
+            {
+                var page = pages[index];
+                bool hasAnnotation = source.Res(page.Dict["Annots"]) is List<object?> { Count: > 0 };
+                if (!hasAnnotation)
+                {
+                    using var image = rendered.Render(index, 800);
+                    if (IsBlankPaper(image) && !PdfLayout.Page(source, page).Glyphs.Any(glyph => !string.IsNullOrWhiteSpace(glyph.Text)))
+                        blank.Add(index);
+                }
+                progress?.Invoke(index + 1, pages.Count);
+            }
+            return (pages.Count, blank.ToArray());
+        }
+
+        internal static bool IsBlankPaper(Bitmap image)
+        {
+            var area = new Rectangle(Point.Empty, image.Size);
+            var pixels = image.LockBits(area, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var row = new byte[image.Width * 4];
+                long total = 0, squares = 0;
+                int samples = 0;
+                for (int y = 0; y < image.Height; y++)
+                {
+                    Marshal.Copy(pixels.Scan0 + y * pixels.Stride, row, 0, row.Length);
+                    for (int x = 0; x < image.Width; x++)
+                    {
+                        int offset = x * 4;
+                        int alpha = row[offset + 3];
+                        int r = 255 - (255 - row[offset + 2]) * alpha / 255;
+                        int g = 255 - (255 - row[offset + 1]) * alpha / 255;
+                        int b = 255 - (255 - row[offset]) * alpha / 255;
+                        if (Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) > 28) return false;
+                        int value = (r * 299 + g * 587 + b * 114) / 1000;
+                        if (value < 150) return false;
+                        total += value;
+                        squares += value * value;
+                        samples++;
+                    }
+                }
+                if (samples == 0) return false;
+                double mean = total / (double)samples;
+                return mean >= 220 && squares / (double)samples - mean * mean < 60;
+            }
+            finally { image.UnlockBits(pixels); }
+        }
+
+        internal static (int Scanned, int Added) AddSearchableText(string path, string output, Action<int, int>? progress = null,
+            Func<Bitmap, OcrPage>? recognize = null)
+        {
+            var source = OpenEditablePdf(path);
+            var pages = source.Pages();
+            var overlays = new Dictionary<int, string>();
+            PagedDocument? rendered = null;
+            int scanned = 0;
+            try
+            {
+                for (int index = 0; index < pages.Count; index++)
+                {
+                    var page = pages[index];
+                    if (!PdfLayout.Page(source, page).Glyphs.Any(glyph => !string.IsNullOrWhiteSpace(glyph.Text)))
+                    {
+                        rendered ??= PagedDocument.Open(path).Document ?? throw new InvalidDataException("PDF tidak dapat dirender untuk OCR.");
+                        if (rendered.Count != pages.Count) throw new InvalidDataException("Jumlah halaman PDF tidak dapat diverifikasi.");
+                        using var image = rendered.Render(index, 2200);
+                        var words = (recognize ?? WinOcrRunner.Recognize)(image);
+                        scanned++;
+                        if (words.Width > 0 && words.Height > 0 && words.Lines.Count > 0)
+                        {
+                            var (transform, width, height) = VisualSpace(page);
+                            double sx = width / (double)words.Width, sy = height / (double)words.Height;
+                            var ops = new StringBuilder().Append("q ").Append(transform).Append("\nBT 3 Tr\n");
+                            foreach (var line in words.Lines)
+                            {
+                                if (string.IsNullOrWhiteSpace(line.Text)) continue;
+                                double font = Math.Max(1, line.Box.Height * sy * 0.8);
+                                ops.Append("/DpFR ").Append(F(font)).Append(" Tf 1 0 0 1 ");
+                                ops.Append(F(line.Box.Left * sx)).Append(' ').Append(F(height - line.Box.Bottom * sy));
+                                ops.Append(" Tm ").Append(PdfCanvas.Lit(line.Text)).Append(" Tj\n");
+                            }
+                            ops.Append("ET Q\n");
+                            overlays.Add(index, ops.ToString());
+                        }
+                    }
+                    progress?.Invoke(index + 1, pages.Count);
+                }
+            }
+            finally { rendered?.Dispose(); }
+
+            if (overlays.Count > 0)
+                SaveEdited(source, output, context =>
+                {
+                    foreach (var (index, content) in overlays)
+                        Overlay(context, source, pages[index], content, Array.Empty<int>());
+                });
+            return (scanned, overlays.Count);
+        }
+
+        internal static int ExtractEmbeddedImages(string path, string folder, string baseName, Action<int, int>? progress = null)
+        {
+            if (ProtectedDoc.IsProtected(path)) throw new InvalidOperationException("Gambar dari Dokumen Terlindungi hanya dapat diambil dari PDF asli yang diekspor oleh pemilik.");
+            var source = OpenPdf(path);
+            if (!source.CanExtract) throw new InvalidOperationException("Pemilik PDF membatasi pengambilan gambar.");
+            var pages = source.Pages();
+            var extracted = new HashSet<object>(ReferenceEqualityComparer.Instance);
+            string stem = $"{AppStorage.BaseName(baseName)}_{DateTime.Now:yyyyMMdd_HHmmss_fff}";
+            int count = 0;
+            for (int index = 0; index < pages.Count; index++)
+            {
+                foreach (var image in PdfLayout.Page(source, pages[index]).Images)
+                {
+                    if (image.Key != null && !extracted.Add(image.Key)) continue;
+                    byte[]? bytes = image.Jpeg;
+                    string extension = bytes != null ? "jpg" : "png";
+                    bytes ??= image.Png;
+                    if (bytes == null) continue;
+                    string file = Path.Combine(folder, $"{stem}_{count + 1}.{extension}");
+                    using (var output = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.None)) output.Write(bytes);
+                    count++;
+                }
+                progress?.Invoke(index + 1, pages.Count);
+            }
+            return count;
+        }
+
+        private static PdfFile OpenEditablePdf(string path)
+        {
+            if (ProtectedDoc.IsProtected(path)) throw new InvalidOperationException("Ekspor PDF asli dari Dokumen Terlindungi sebelum menyunting.");
+            var source = OpenPdf(path);
+            if (!source.CanModify) throw new InvalidOperationException("Pemilik PDF membatasi perubahan dokumen.");
+            return source;
+        }
+
+        internal static void ExportPresentation(string path, string output, Action<int, int>? progress = null)
+        {
+            using var slides = new PptxRenderer(path);
+            if (slides.SlideCount == 0 || slides.Cx <= 0 || slides.Cy <= 0 || slides.Aspect is < 0.05f or > 20f)
+                throw new InvalidDataException("Ukuran slide atau jumlah slide tidak valid.");
+            float pageWidth = slides.Cx / 12700f, pageHeight = slides.Cy / 12700f;
+            string staged = output + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                using var writer = new PdfWriter(staged, slides.SlideCount);
+                int renderWidth = (int)(2000 * Math.Min(1, slides.Aspect));
+                for (int index = 0; index < slides.SlideCount; index++)
+                {
+                    using var image = slides.RenderSlide(index, renderWidth);
+                    writer.AddPage(PdfEngine.EncodeJpeg(image, 90), image.Width, image.Height,
+                        pageWidth, pageHeight, 0, 0, pageWidth, pageHeight);
+                    progress?.Invoke(index + 1, slides.SlideCount);
+                }
+                writer.Finish();
+                File.Move(staged, output, overwrite: true);
+            }
+            finally { if (File.Exists(staged)) File.Delete(staged); }
         }
 
         // ------------------------------------------------------------------ PDF ke Word

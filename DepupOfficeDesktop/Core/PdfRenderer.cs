@@ -96,6 +96,35 @@ namespace DepupOfficeDesktop.Core
 
         private static (PdfOpenStatus Status, T Value) RunCore<T>(string path, string? password, Func<WinPdf.PdfDocument, T> work)
         {
+            var (status, session) = OpenDocument(path, password);
+            if (session == null) return (status, default!);
+            using (session) return Work(session.Document, work);
+        }
+
+        // Keep the WinRT stream alive for as long as the document can render pages.
+        internal sealed class DocumentSession(WinPdf.PdfDocument document, WinStreams.InMemoryRandomAccessStream stream) : IDisposable
+        {
+            internal WinPdf.PdfDocument Document { get; } = document;
+            internal int Count => checked((int)Document.PageCount);
+
+            internal SizeF PageSize(int index)
+            {
+                using var page = Document.GetPage((uint)index);
+                return new SizeF((float)page.Size.Width, (float)page.Size.Height);
+            }
+
+            internal Bitmap Render(int index, int dimension)
+            {
+                using var page = Document.GetPage((uint)index);
+                return RenderPage(page, dimension);
+            }
+
+            public void Dispose() => stream.Dispose();
+        }
+
+        // Called off the WinForms thread by readers that need more than one page.
+        internal static (PdfOpenStatus Status, DocumentSession? Session) OpenDocument(string path, string? password)
+        {
             byte[] data;
             try
             {
@@ -106,23 +135,19 @@ namespace DepupOfficeDesktop.Core
                 return (PdfOpenStatus.Failed, default!);
             }
 
-            using var ras = new WinStreams.InMemoryRandomAccessStream();
-            WinPdf.PdfDocument? doc = TryLoad(ras, data, password);
-            if (doc == null)
-            {
-                if (!IsEncrypted(path)) return (PdfOpenStatus.Failed, default!);
+            var session = TryLoad(data, password);
+            if (session != null) return (PdfOpenStatus.Ok, session);
+            if (!IsEncrypted(path)) return (PdfOpenStatus.Failed, null);
 
-                // Mesin PDF Windows TIDAK mendukung AES-256 revisi 6 (dipakai Acrobat modern, Android Depup, dan alat
-                // Kunci/Anti-Kopi/Dokumen Terlindungi di aplikasi ini). Dekripsi di MEMORI memakai parser internal,
-                // lalu berikan salinan polosnya ke Windows. Tidak ada salinan polos yang ditulis ke disk.
+            // Windows.Data.Pdf needs a decrypted in-memory copy for AES-256 R6.
+            // Hold the gate until WinRT has consumed the cached bytes so Forget cannot wipe them mid-copy.
+            lock (Gate)
+            {
                 var (st, plain) = DecryptForWindows(path, data, password);
-                if (plain == null) return (st, default!);
-                using var ras2 = new WinStreams.InMemoryRandomAccessStream();
-                doc = TryLoad(ras2, plain, null);
-                if (doc == null) return (PdfOpenStatus.Failed, default!);
-                return Work(doc, work);
+                if (plain == null) return (st, null);
+                session = TryLoad(plain, null);
             }
-            return Work(doc, work);
+            return session == null ? (PdfOpenStatus.Failed, null) : (PdfOpenStatus.Ok, session);
         }
 
         private static (PdfOpenStatus, T) Work<T>(WinPdf.PdfDocument doc, Func<WinPdf.PdfDocument, T> work)
@@ -131,17 +156,19 @@ namespace DepupOfficeDesktop.Core
             catch { return (PdfOpenStatus.Failed, default!); }
         }
 
-        private static WinPdf.PdfDocument? TryLoad(WinStreams.InMemoryRandomAccessStream ras, byte[] data, string? password)
+        private static DocumentSession? TryLoad(byte[] data, string? password)
         {
+            var ras = new WinStreams.InMemoryRandomAccessStream();
             try
             {
                 ras.WriteAsync(data.AsBuffer()).AsTask().GetAwaiter().GetResult();
                 ras.Seek(0);
-                return string.IsNullOrEmpty(password)
+                var document = string.IsNullOrEmpty(password)
                     ? WinPdf.PdfDocument.LoadFromStreamAsync(ras).AsTask().GetAwaiter().GetResult()
                     : WinPdf.PdfDocument.LoadFromStreamAsync(ras, password).AsTask().GetAwaiter().GetResult();
+                return new DocumentSession(document, ras);
             }
-            catch { return null; }
+            catch { ras.Dispose(); return null; }
         }
 
         // Satu entri cache (berkas terakhir) agar PageCount → Render → dst. tidak mendekripsi ulang PDF besar.
@@ -152,16 +179,14 @@ namespace DepupOfficeDesktop.Core
             string key = Key(path), pw = password ?? "";
             DateTime mod;
             try { mod = File.GetLastWriteTimeUtc(path); } catch { mod = default; }
-            lock (Gate)
-            {
-                if (_plainCache is { } c && c.Key == key && c.Len == data.Length && c.Mod == mod && c.Pw == pw)
-                    return (PdfOpenStatus.Ok, c.Plain);
-            }
+            if (_plainCache is { } c && c.Key == key && c.Len == data.Length && c.Mod == mod && c.Pw == pw)
+                return (PdfOpenStatus.Ok, c.Plain);
             try
             {
                 var f = PdfFile.Open(data, pw);
                 var plain = PdfSave.WriteBytes(f);
-                lock (Gate) { WipeCache(); _plainCache = (key, data.Length, mod, pw, plain); }
+                WipeCache();
+                _plainCache = (key, data.Length, mod, pw, plain);
                 return (PdfOpenStatus.Ok, plain);
             }
             catch (PdfPasswordException)

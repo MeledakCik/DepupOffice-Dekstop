@@ -116,6 +116,61 @@ public sealed class MigrationTests
     }
 
     [Fact]
+    public async Task PagedReaderRendersRotatedEncryptedPagesInAnyOrder()
+    {
+        var source = PdfFile.Open(TinyPdf("Halaman uji"));
+        var composer = new PdfComposer();
+        composer.AddPage(source, source.Pages()[0]);
+        composer.AddPage(source, source.Pages()[0], 90);
+        using var composed = new MemoryStream();
+        composer.Save(composed);
+        string path = Path.Combine(Path.GetTempPath(), $"reader_{Guid.NewGuid():N}.pdf");
+        try
+        {
+            File.WriteAllBytes(path, PdfSave.WriteBytes(PdfFile.Open(composed.ToArray()), new PdfSave.Lock("pembaca", "pemilik", new PdfSave.Perms())));
+            Assert.Equal(PdfOpenStatus.PasswordRequired, (await Task.Run(() => PagedDocument.Open(path))).Status);
+            Assert.Equal(PdfOpenStatus.Ok, PdfRenderer.Unlock(path, "pembaca"));
+
+            var (status, document) = await Task.Run(() => PagedDocument.Open(path));
+            using var opened = Assert.IsType<PagedDocument>(document);
+            Assert.Equal(PdfOpenStatus.Ok, status);
+            Assert.Equal(2, opened.Count);
+            Assert.True(opened.Sizes[0].Height > opened.Sizes[0].Width);
+            Assert.True(opened.Sizes[1].Width > opened.Sizes[1].Height);
+
+            PdfRenderer.Forget(path);
+            using var landscape = await Task.Run(() => opened.Render(1, 480));
+            using var portrait = await Task.Run(() => opened.Render(0, 480));
+            Assert.Equal(480, landscape.Width);
+            Assert.Equal(480, portrait.Height);
+        }
+        finally
+        {
+            PdfRenderer.Forget(path);
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void CompressionKeepsOriginalWhenItAlreadyMeetsTheTarget()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"compress_in_{Guid.NewGuid():N}.pdf");
+        string output = Path.Combine(Path.GetTempPath(), $"compress_out_{Guid.NewGuid():N}.pdf");
+        try
+        {
+            byte[] source = TinyPdf("Teks asli tetap bisa dicari");
+            File.WriteAllBytes(input, source);
+            PdfEngine.CompressToTarget(input, 200, output);
+            Assert.Equal(source, File.ReadAllBytes(output));
+        }
+        finally
+        {
+            File.Delete(input);
+            File.Delete(output);
+        }
+    }
+
+    [Fact]
     public void BarcodePatternsMatchReference()
     {
         // referensi: python-barcode

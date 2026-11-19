@@ -1,911 +1,595 @@
-using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Windows.Forms;
 using DepupOfficeDesktop.Controls;
 using DepupOfficeDesktop.Core;
 
-namespace DepupOfficeDesktop.Forms
+namespace DepupOfficeDesktop.Forms;
+
+public sealed class ScanEditForm : Form
 {
-    /// <summary>
-    /// Porting dari ScanEditActivity.kt & CameraActivity.kt:
-    /// Studio Scan & Edit Dokumen Desktop: mendukung multi-halaman, Auto-Crop AI (Otsu+Sobel),
-    /// Deskew (Luruskan otomatis), 4 Preset Filter (Magic Color, B&W Dokumen, Grayscale, Warna Asli),
-    /// Kecerahan/Kontras, Sensur Hitam (Redaksi NIK), Cap Watermark Diagonal, Tata KTP 2-Sisi ke 1 Lembar A4,
-    /// OCR Offline + Penerjemah EN-ID + Ringkasan Poin Krusial + Deteksi Struk ke Excel,
-    /// serta Modal Simpan & Ekspor (.PDF dengan enkripsi AES-128, .DOCX, .JPG).
-    /// </summary>
-    public class ScanEditForm : Form
+    internal const string ImageFilter = "Gambar (*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff)|*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff";
+    private const int PreviewSize = 1100;
+
+    private readonly List<ScanPage> _pages;
+    private readonly Func<string> _nextPhotoPath;
+    private readonly CropCanvasControl _canvas = new() { Dock = DockStyle.Fill, AccessibleName = "Pratinjau dan batas potong dokumen" };
+    private readonly ComboBox _pageSelector = new() { DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Halaman pindai" };
+    private readonly SplitContainer _workspace = new() { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel2 };
+    private readonly System.Windows.Forms.Timer _previewTimer = new() { Interval = 100 };
+    private Panel _cropTools = null!, _filterTools = null!;
+    private Button _previous = null!, _next = null!, _moveUp = null!, _moveDown = null!, _remove = null!, _redact = null!;
+    private int _index, _brightness, _contrast;
+    private int _mode = 3;
+    private bool _updatingPages, _arranging;
+    private ScanPage Current => _pages[_index];
+
+    public string? OutputFilePath { get; private set; }
+    public int OutputJpgCount { get; private set; }
+
+    internal ScanEditForm(List<ScanPage> pages, Func<string> nextPhotoPath, bool receipt)
     {
-        private readonly List<ScanPage> _pages = new();
-        private int _cur = 0;
-        private int _mode = 3; // 0 = Asli, 1 = Grayscale, 2 = B&W Dokumen, 3 = Magic Color
-        private int _bright = 0;
-        private int _contrast = 0;
-
-        private CropCanvasControl _cropCanvas = null!;
-        private Label _subLabel = null!;
-        private FlowLayoutPanel _pageChipsFlow = null!;
-        private Panel _cropToolsPanel = null!;
-        private Panel _filterToolsPanel = null!;
-        private Button _tabCropBtn = null!;
-        private Button _tabFilterBtn = null!;
-
-        public string? OutputFilePath { get; private set; }
-        public int OutputJpgCount { get; private set; }
-
-        public ScanEditForm(IEnumerable<string> initialFiles, int initialMode = 3)
+        _pages = pages;
+        _nextPhotoPath = nextPhotoPath;
+        Text = "Studio Pindai";
+        AutoScaleMode = AutoScaleMode.None;
+        StartPosition = FormStartPosition.CenterParent;
+        ClientSize = new Size(Theme.S(1080), Theme.S(720));
+        MinimumSize = new Size(Math.Min(Theme.S(640), 800), Math.Min(Theme.S(460), 600));
+        BackColor = Theme.BG;
+        ShowInTaskbar = false;
+        Build();
+        _previewTimer.Tick += (_, _) =>
         {
-            foreach (string f in initialFiles.Where(File.Exists))
-                _pages.Add(new ScanPage(f));
-
-            _mode = initialMode;
-
-            Text = "Studio Smart Scan & Edit Dokumen — Depup Office Desktop";
-            Size = new Size(1080, 780);
-            MinimumSize = new Size(880, 640);
-            StartPosition = FormStartPosition.CenterParent;
-            BackColor = Theme.BG;
-
-            if (_pages.Count == 0)
-            {
-                // Buat halaman sampel dokumen cerdas jika pengguna membuka kamera/scanner simulasi langsung
-                _pages.Add(CreateSimulatedCameraScanPage(1));
-            }
-
-            BuildUi();
-            ShowCurrentPage();
-            AutoDetectPages(_pages, doCrop: true, doSkew: true, announce: true);
-        }
-
-        public static ScanPage CreateSimulatedCameraScanPage(int index)
+            _previewTimer.Stop();
+            _canvas.SetFilter(_mode, _brightness, _contrast);
+        };
+        Shown += (_, _) =>
         {
-            string dir = Path.Combine(AppStorage.AppDataDir, "scans");
-            Directory.CreateDirectory(dir);
-            string path = Path.Combine(dir, $"scan_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{index}.jpg");
+            ArrangeWorkspace();
+            UpdatePageSelector();
+            ShowPage();
+            if (receipt) ShowRecognizedText(editReceipt: true);
+        };
+    }
 
-            using var bmp = new Bitmap(1200, 1650);
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.Clear(ColorTranslator.FromHtml("#334155")); // Latar meja gelap agar Otsu mendeteksi tepi kertas
-                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                g.FillRectangle(Brushes.White, 90, 95, 1020, 1460);
-
-                using var hFont = new Font("Segoe UI", 28f, FontStyle.Bold, GraphicsUnit.Pixel);
-                using var bFont = new Font("Segoe UI", 20f, FontStyle.Regular, GraphicsUnit.Pixel);
-                using var mFont = new Font("Consolas", 19f, FontStyle.Bold, GraphicsUnit.Pixel);
-
-                g.DrawString("SURAT PERJANJIAN & FAKTUR RESMI", hFont, Brushes.MidnightBlue, 150, 170);
-                g.DrawString($"Nomor: 0{index}/INV-DEPUP/{DateTime.Now:yyyy} • Tanggal: {DateTime.Now:dd/MM/yyyy}", bFont, Brushes.DarkSlateGray, 150, 230);
-                g.DrawLine(Pens.LightSlateGray, 150, 275, 1050, 275);
-
-                g.DrawString("Pasal 1 — Ruang Lingkup Layanan", hFont, Brushes.Black, 150, 320);
-                g.DrawString("Dokumen ini dipindai menggunakan Smart Scanner Depup Office Desktop.\nSeluruh pemrosesan Auto-Crop AI, pelurusan teks (Deskew), filter dokumen\nhitam-putih adaptif, serta pengenalan teks (OCR) berjalan 100% lokal.", bFont, Brushes.Black, 150, 375);
-
-                g.DrawString("Rincian Nota / Tagihan:", hFont, Brushes.Black, 150, 540);
-                g.DrawString("1. Lisensi Depup Office Enterprise      Rp 1.500.000\n2. Modul Smart OCR & Brankas AES-256    Rp   750.000\n----------------------------------------------------\nTOTAL BAYAR:                            Rp 2.250.000", mFont, Brushes.DarkGreen, 150, 600);
-            }
-            File.WriteAllBytes(path, PdfEngine.EncodeJpeg(bmp, 92));
-            return new ScanPage(path);
-        }
-
-        private void BuildUi()
+    internal static List<ScanPage> ImportPages(IWin32Window owner, string[] files)
+    {
+        var (ok, result) = Ui.Busy(owner, "Membaca foto dan mencari tepi dokumen…", progress =>
         {
-            // Top Bar
-            var topBar = new Panel
+            var pages = new List<ScanPage>();
+            var rejected = new List<string>();
+            for (int index = 0; index < files.Length; index++)
             {
-                Dock = DockStyle.Top,
-                Height = 60,
-                BackColor = Theme.SURFACE,
-                Padding = new Padding(16, 10, 16, 10)
-            };
-
-            var btnClose = Theme.CreateButton("✕ Batal", false, Theme.TEXT, 38, 95);
-            btnClose.Location = new Point(16, 11);
-            btnClose.Click += (s, e) => Close();
-            topBar.Controls.Add(btnClose);
-
-            var lblTitle = new Label
-            {
-                Text = "Edit Hasil Scan & Kamera",
-                Font = Theme.FontHead(13.5f),
-                ForeColor = Theme.TEXT,
-                AutoSize = true,
-                Location = new Point(126, 9)
-            };
-            topBar.Controls.Add(lblTitle);
-
-            _subLabel = new Label
-            {
-                Text = $"Hal 1 dari {_pages.Count}",
-                Font = Theme.FontBody(9.5f),
-                ForeColor = Theme.MUTED,
-                AutoSize = true,
-                Location = new Point(126, 34)
-            };
-            topBar.Controls.Add(_subLabel);
-
-            var rightBar = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Right,
-                AutoSize = true,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false
-            };
-
-            var btnVoice = Theme.CreateButton("🔊 Bacakan OCR", false, Theme.INDIGO, 36);
-            btnVoice.Click += (s, e) =>
-            {
-                using var bmp = PdfEngine.ProcessScanPage(_pages[_cur], _mode, 1800, _bright, _contrast);
-                var ocr = PdfEngine.RunOcr(bmp);
-                if (string.IsNullOrWhiteSpace(ocr.Text))
-                {
-                    Theme.Toast(this, PdfEngine.LastOcrError ?? "Tidak ada teks terdeteksi pada halaman ini");
-                    return;
-                }
-                VoiceReaderManager.ShowVoiceReaderDialog(this, $"Hasil Scan Hal {_cur + 1}", ocr.Text);
-            };
-
-            var btnPrint = Theme.CreateButton("🖨️ Cetak Scan", false, Theme.TEAL, 36);
-            btnPrint.Click += (s, e) =>
-            {
-                using var bmp = PdfEngine.ProcessScanPage(_pages[_cur], _mode, 1800, _bright, _contrast);
-                PrintHelper.PrintBitmap(this, bmp, $"Hasil_Scan_{_cur + 1}");
-            };
-
-            var btnAddPhoto = Theme.CreateButton("+ Tambah Foto/Scan", false, Theme.ACCENT, 36);
-            btnAddPhoto.Click += (s, e) => AddPhotoPages();
-
-            var btnSaveNext = Theme.CreateButton("Lanjut Simpan & Ekspor →", true, Theme.ACCENT, 36);
-            btnSaveNext.Click += (s, e) => ShowSaveExportModal();
-
-            rightBar.Controls.AddRange(new Control[] { btnVoice, btnPrint, btnAddPhoto, btnSaveNext });
-            topBar.Controls.Add(rightBar);
-
-            // Split Main Workspace: Left = Interactive CropCanvas, Right = Controls Panel
-            var mainSplit = new SplitContainer
-            {
-                Dock = DockStyle.Fill,
-                Orientation = Orientation.Vertical,
-                SplitterDistance = 620,
-                BackColor = Theme.BG
-            };
-
-            // Left Panel: CropCanvas + Page Selector Chips
-            var leftHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16) };
-            _cropCanvas = new CropCanvasControl { Dock = DockStyle.Fill };
-            _cropCanvas.OnCropChanged = () =>
-            {
-                if (_cur >= 0 && _cur < _pages.Count)
-                {
-                    _pages[_cur].Crop = _cropCanvas.Crop;
-                }
-            };
-
-            _pageChipsFlow = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Bottom,
-                Height = 46,
-                FlowDirection = FlowDirection.LeftToRight,
-                Padding = new Padding(4, 6, 4, 4),
-                AutoScroll = true
-            };
-
-            leftHost.Controls.Add(_cropCanvas);
-            leftHost.Controls.Add(_pageChipsFlow);
-            mainSplit.Panel1.Controls.Add(leftHost);
-
-            // Right Panel: Mode Tabs (Potong vs Filter) + Action Cards
-            var rightHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(14), AutoScroll = true };
-
-            var tabSwitch = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                Height = 44,
-                FlowDirection = FlowDirection.LeftToRight
-            };
-            _tabCropBtn = Theme.CreateButton("✂️ Potong & AI Tools", true, Theme.ACCENT, 36, 185);
-            _tabFilterBtn = Theme.CreateButton("🎨 Filter & Kecerahan", false, Theme.ACCENT, 36, 185);
-            _tabCropBtn.Click += (s, e) => SwitchRightTab(0);
-            _tabFilterBtn.Click += (s, e) => SwitchRightTab(1);
-            tabSwitch.Controls.AddRange(new Control[] { _tabCropBtn, _tabFilterBtn });
-
-            // --- Crop & AI Panel ---
-            _cropToolsPanel = new Panel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(0, 10, 0, 10) };
-            var cropFlow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-
-            // Baris 1: Geometri Dasar
-            var geoCard = new CardPanel { Width = 380, Height = 105, Margin = new Padding(0, 0, 0, 12) };
-            geoCard.Controls.Add(new Label { Text = "Geometri & Orientasi Halaman", Font = Theme.FontLabel(9.5f), ForeColor = Theme.TEXT, Location = new Point(14, 10), AutoSize = true });
-            var geoBtns = new FlowLayoutPanel { Location = new Point(12, 36), Size = new Size(356, 56), FlowDirection = FlowDirection.LeftToRight };
-            var bRot = Theme.CreateButton("↻ Putar 90°", false, Theme.TEXT, 34);
-            bRot.Click += (s, e) => RotateCurrent();
-            var bFlip = Theme.CreateButton("⇄ Balikkan", false, Theme.TEXT, 34);
-            bFlip.Click += (s, e) => FlipCurrent();
-            var bFull = Theme.CreateButton("⛶ Potong Penuh", false, Theme.TEXT, 34);
-            bFull.Click += (s, e) => { _pages[_cur].Crop = new RectangleF(0f, 0f, 1f, 1f); ShowCurrentPage(); };
-            var bDelPage = Theme.CreateButton("🗑️ Hapus", false, Theme.RED, 34);
-            bDelPage.Click += (s, e) => RemoveCurrentPage();
-            geoBtns.Controls.AddRange(new Control[] { bRot, bFlip, bFull, bDelPage });
-            geoCard.Controls.Add(geoBtns);
-            cropFlow.Controls.Add(geoCard);
-
-            // Baris 2: AI Smart Tools
-            var aiCard = new CardPanel { Width = 380, Height = 110, BackColor = Theme.BLUE_BG, BorderColor = Theme.BLUE_LINE, Margin = new Padding(0, 0, 0, 12) };
-            aiCard.Controls.Add(new Label { Text = "✨ Deteksi Dokumen Cerdas (Offline AI)", Font = Theme.FontLabel(9.5f), ForeColor = Theme.ACCENT, Location = new Point(14, 10), AutoSize = true });
-            var aiBtns = new FlowLayoutPanel { Location = new Point(12, 38), Size = new Size(356, 56), FlowDirection = FlowDirection.LeftToRight };
-            var bAutoCrop = Theme.CreateButton("🪄 Auto-Crop AI", true, Theme.ACCENT, 34);
-            bAutoCrop.Click += (s, e) => AutoDetectPages(new[] { _pages[_cur] }, doCrop: true, doSkew: false, announce: false);
-            var bDeskew = Theme.CreateButton("📐 Luruskan Teks", false, Theme.ACCENT, 34);
-            bDeskew.BackColor = Color.White;
-            bDeskew.Click += (s, e) => AutoDetectPages(new[] { _pages[_cur] }, doCrop: false, doSkew: true, announce: false);
-            var bOcr = Theme.CreateButton("📝 Teks (OCR)", false, Theme.ACCENT, 34);
-            bOcr.BackColor = Color.White;
-            bOcr.Click += (s, e) => RunAndShowOcrModal();
-            aiBtns.Controls.AddRange(new Control[] { bAutoCrop, bDeskew, bOcr });
-            aiCard.Controls.Add(aiBtns);
-            cropFlow.Controls.Add(aiCard);
-
-            // Baris 3: Keamanan, Sensur NIK & Watermark
-            var secCard = new CardPanel { Width = 380, Height = 115, BackColor = Theme.AMBER_BG, BorderColor = Theme.AMBER, Margin = new Padding(0, 0, 0, 12) };
-            secCard.Controls.Add(new Label { Text = "🛡️ Perlindungan Privasi (Sensur NIK & Watermark)", Font = Theme.FontLabel(9.5f), ForeColor = Theme.AMBER, Location = new Point(14, 10), AutoSize = true });
-            var secBtns = new FlowLayoutPanel { Location = new Point(12, 38), Size = new Size(356, 60), FlowDirection = FlowDirection.LeftToRight };
-            var bRedact = Theme.CreateButton("⬛ Mode Sensur NIK", false, Theme.AMBER, 34);
-            bRedact.BackColor = Color.White;
-            bRedact.Click += (s, e) =>
-            {
-                _cropCanvas.IsRedactMode = !_cropCanvas.IsRedactMode;
-                bRedact.BackColor = _cropCanvas.IsRedactMode ? Theme.AMBER : Color.White;
-                bRedact.ForeColor = _cropCanvas.IsRedactMode ? Color.White : Theme.AMBER;
-                Theme.Toast(this, _cropCanvas.IsRedactMode
-                    ? "Mode Sensur Aktif: Seret mouse di atas NIK/data rahasia untuk menutupinya"
-                    : "Mode Sensur Nonaktif");
-            };
-            var bWatermark = Theme.CreateButton("🏷️ Cap Watermark", false, Theme.AMBER, 34);
-            bWatermark.BackColor = Color.White;
-            bWatermark.Click += (s, e) => ShowWatermarkDialog();
-            var bClearRedact = Theme.CreateButton("Hapus Sensur", false, Theme.RED, 34);
-            bClearRedact.BackColor = Color.White;
-            bClearRedact.Click += (s, e) =>
-            {
-                _pages[_cur].Redactions.Clear();
-                _cropCanvas.ActiveRedactions.Clear();
-                _cropCanvas.Invalidate();
-                Theme.Toast(this, "Sensur pada halaman ini dibersihkan");
-            };
-            secBtns.Controls.AddRange(new Control[] { bRedact, bWatermark, bClearRedact });
-            secCard.Controls.Add(secBtns);
-            cropFlow.Controls.Add(secCard);
-
-            // Baris 4: Tata KTP 2-Sisi ke 1 Lembar A4
-            var ktpCard = new CardPanel { Width = 380, Height = 105, BackColor = Theme.SKY_BG, BorderColor = Theme.SKY, Margin = new Padding(0, 0, 0, 12) };
-            ktpCard.Controls.Add(new Label
-            {
-                Text = "🪪 Tata KTP 2-Sisi ke 1 Halaman A4\nGabung foto KTP Depan & Belakang dalam 1 lembar A4 siap cetak.",
-                Font = Theme.FontBody(9f),
-                ForeColor = Theme.TEXT,
-                Location = new Point(14, 10),
-                Size = new Size(350, 42)
-            });
-            var btnKtpA4 = Theme.CreateButton("🪪 Tata KTP Depan & Belakang ke A4", true, Theme.SKY, 34, 350);
-            btnKtpA4.Location = new Point(14, 56);
-            btnKtpA4.Click += (s, e) => LayoutKtp2SidedA4();
-            ktpCard.Controls.Add(btnKtpA4);
-            cropFlow.Controls.Add(ktpCard);
-
-            _cropToolsPanel.Controls.Add(cropFlow);
-
-            // --- Filter & Kecerahan Panel ---
-            _filterToolsPanel = new Panel { Dock = DockStyle.Top, AutoSize = true, Visible = false, Padding = new Padding(0, 10, 0, 10) };
-            var filterFlow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-
-            var presetCard = new CardPanel { Width = 380, Height = 195, Margin = new Padding(0, 0, 0, 12) };
-            presetCard.Controls.Add(new Label { Text = "Gaya Filter Dokumen (4 Preset)", Font = Theme.FontLabel(10f), ForeColor = Theme.TEXT, Location = new Point(14, 12), AutoSize = true });
-
-            (int ModeVal, string Name, string Desc)[] presets =
-            {
-                (3, "✨ Magic Color (Rekomendasi)", "Kertas bersih, teks tegas & warna hidup"),
-                (2, "📄 B&W Dokumen (Teks Tajam)", "Ambang adaptif integral-image hitam-putih"),
-                (1, "🌑 Grayscale (Abu-abu)", "Foto dokumen netral"),
-                (0, "🖼️ Warna Asli", "Tanpa filter warna")
-            };
-
-            int py = 40;
-            var presetButtons = new List<(int ModeVal, Button Btn)>();
-            foreach (var p in presets)
-            {
-                int mv = p.ModeVal;
-                var b = new Button
-                {
-                    Text = $"{p.Name} — {p.Desc}",
-                    FlatStyle = FlatStyle.Flat,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Font = Theme.FontLabel(9f),
-                    Location = new Point(14, py),
-                    Size = new Size(350, 34),
-                    Cursor = Cursors.Hand
-                };
-                b.Click += (s, e) =>
-                {
-                    _mode = mv;
-                    UpdatePresetButtonStyles();
-                    _cropCanvas.SetFilter(_mode, _bright, _contrast);
-                };
-                presetButtons.Add((mv, b));
-                presetCard.Controls.Add(b);
-                py += 38;
-            }
-
-            void UpdatePresetButtonStyles()
-            {
-                foreach (var (mv, btn) in presetButtons)
-                {
-                    bool on = mv == _mode;
-                    btn.BackColor = on ? Theme.ACCENT : Theme.SURFACE2;
-                    btn.ForeColor = on ? Color.White : Theme.TEXT;
-                    btn.FlatAppearance.BorderSize = 0;
-                }
-            }
-            UpdatePresetButtonStyles();
-            filterFlow.Controls.Add(presetCard);
-
-            var sliderCard = new CardPanel { Width = 380, Height = 170 };
-            var lblBright = new Label { Text = "☀️ Kecerahan: +0%", Font = Theme.FontLabel(9.5f), Location = new Point(14, 14), AutoSize = true };
-            var tbBright = new TrackBar { Minimum = -50, Maximum = 50, Value = 0, TickFrequency = 10, Location = new Point(14, 36), Width = 350 };
-            tbBright.Scroll += (s, e) =>
-            {
-                _bright = tbBright.Value;
-                lblBright.Text = $"☀️ Kecerahan: {(_bright >= 0 ? "+" : "")}{_bright}%";
-                _cropCanvas.SetFilter(_mode, _bright, _contrast);
-            };
-
-            var lblContrast = new Label { Text = "◐ Kontras Teks: +0%", Font = Theme.FontLabel(9.5f), Location = new Point(14, 90), AutoSize = true };
-            var tbContrast = new TrackBar { Minimum = -50, Maximum = 50, Value = 0, TickFrequency = 10, Location = new Point(14, 112), Width = 350 };
-            tbContrast.Scroll += (s, e) =>
-            {
-                _contrast = tbContrast.Value;
-                lblContrast.Text = $"◐ Kontras Teks: {(_contrast >= 0 ? "+" : "")}{_contrast}%";
-                _cropCanvas.SetFilter(_mode, _bright, _contrast);
-            };
-
-            sliderCard.Controls.AddRange(new Control[] { lblBright, tbBright, lblContrast, tbContrast });
-            filterFlow.Controls.Add(sliderCard);
-            _filterToolsPanel.Controls.Add(filterFlow);
-
-            rightHost.Controls.Add(_filterToolsPanel);
-            rightHost.Controls.Add(_cropToolsPanel);
-            rightHost.Controls.Add(tabSwitch);
-            mainSplit.Panel2.Controls.Add(rightHost);
-
-            Controls.Add(mainSplit);
-            Controls.Add(topBar);
-        }
-
-        private void SwitchRightTab(int idx)
-        {
-            _cropToolsPanel.Visible = idx == 0;
-            _filterToolsPanel.Visible = idx == 1;
-            _tabCropBtn.BackColor = idx == 0 ? Theme.ACCENT : Theme.BLUE_BG;
-            _tabCropBtn.ForeColor = idx == 0 ? Color.White : Theme.ACCENT;
-            _tabFilterBtn.BackColor = idx == 1 ? Theme.ACCENT : Theme.BLUE_BG;
-            _tabFilterBtn.ForeColor = idx == 1 ? Color.White : Theme.ACCENT;
-        }
-
-        private void ShowCurrentPage()
-        {
-            if (_pages.Count == 0) return;
-            _cur = Math.Clamp(_cur, 0, _pages.Count - 1);
-            var pg = _pages[_cur];
-
-            using var baseBmp = PdfEngine.Decode(pg.FilePath, 1400);
-            _cropCanvas.ActiveRedactions.Clear();
-            _cropCanvas.ActiveRedactions.AddRange(pg.Redactions);
-            _cropCanvas.ActiveWatermark = pg.Watermark;
-            _cropCanvas.SetBitmap(baseBmp, pg.Rot, pg.Flip, pg.Crop, pg.Skew);
-            _cropCanvas.SetFilter(_mode, _bright, _contrast);
-            _cropCanvas.OnCropChanged = () =>
-            {
-                pg.Crop = _cropCanvas.Crop;
-                pg.Redactions.Clear();
-                pg.Redactions.AddRange(_cropCanvas.ActiveRedactions);
-            };
-
-            _subLabel.Text = $"Hal {_cur + 1} dari {_pages.Count}";
-
-            _pageChipsFlow.Controls.Clear();
-            for (int i = 0; i < _pages.Count; i++)
-            {
-                int idx = i;
-                bool active = idx == _cur;
-                var b = new Button
-                {
-                    Text = $"Hal {idx + 1}",
-                    FlatStyle = FlatStyle.Flat,
-                    Font = Theme.FontLabel(9f),
-                    BackColor = active ? Theme.ACCENT : Theme.SURFACE,
-                    ForeColor = active ? Color.White : Theme.TEXT,
-                    Size = new Size(68, 30),
-                    Cursor = Cursors.Hand
-                };
-                b.FlatAppearance.BorderColor = Theme.LINE;
-                b.Click += (s, e) => { _cur = idx; ShowCurrentPage(); };
-                _pageChipsFlow.Controls.Add(b);
-            }
-        }
-
-        private void RotateCurrent()
-        {
-            var pg = _pages[_cur];
-            var c = pg.Crop;
-            pg.Crop = RectangleF.FromLTRB(1f - c.Bottom, c.Left, 1f - c.Top, c.Right);
-            pg.Rot = (pg.Rot + (pg.Flip ? 270 : 90)) % 360;
-            ShowCurrentPage();
-        }
-
-        private void FlipCurrent()
-        {
-            var pg = _pages[_cur];
-            var c = pg.Crop;
-            pg.Crop = RectangleF.FromLTRB(1f - c.Right, c.Top, 1f - c.Left, c.Bottom);
-            pg.Skew = -pg.Skew;
-            pg.Flip = !pg.Flip;
-            ShowCurrentPage();
-        }
-
-        private void RemoveCurrentPage()
-        {
-            if (_pages.Count <= 1)
-            {
-                Theme.Toast(this, "Minimal harus ada satu halaman");
-                return;
-            }
-            _pages.RemoveAt(_cur);
-            ShowCurrentPage();
-        }
-
-        private void AddPhotoPages()
-        {
-            using var ofd = new OpenFileDialog
-            {
-                Title = "Tambah Foto / Gambar Halaman Scan",
-                Multiselect = true,
-                Filter = "Gambar (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp"
-            };
-            if (ofd.ShowDialog(this) == DialogResult.OK)
-            {
-                foreach (string f in ofd.FileNames)
-                    _pages.Add(new ScanPage(f));
-                _cur = _pages.Count - 1;
-                ShowCurrentPage();
-            }
-        }
-
-        private void AutoDetectPages(IReadOnlyList<ScanPage> list, bool doCrop, bool doSkew, bool announce)
-        {
-            int found = 0, fixedSkew = 0;
-            foreach (var pg in list)
-            {
+                string file = files[index];
                 try
                 {
-                    using var baseBmp = PdfEngine.Decode(pg.FilePath, 1000);
-                    using var oriented = PdfEngine.Orient(baseBmp, pg.Rot, pg.Flip);
-                    float skew = pg.Skew;
-                    if (doSkew)
-                        skew = ScanAi.DetectSkew(oriented, ScanAi.DetectCrop(oriented));
-                    using var deskewed = PdfEngine.Deskew(oriented, skew);
-                    var crop = doCrop ? ScanAi.DetectCrop(deskewed) : null;
-
-                    if (doSkew && Math.Abs(skew - pg.Skew) > 0.05f) { pg.Skew = skew; fixedSkew++; }
-                    if (doCrop && crop.HasValue) { pg.Crop = crop.Value; found++; }
+                    using var source = PdfEngine.Decode(file, 900);
+                    var page = new ScanPage(file);
+                    DetectGeometry(page, source, crop: true, straighten: true);
+                    pages.Add(page);
                 }
-                catch { }
-            }
-            ShowCurrentPage();
-            if (announce && found > 0)
-                Theme.Toast(this, $"Tepi dokumen terdeteksi di {found} halaman" + (fixedSkew > 0 ? $" · {fixedSkew} diluruskan" : ""));
-            else if (!announce)
-                Theme.Toast(this, doCrop ? (found > 0 ? "Auto-crop AI diterapkan" : "Tepi sudah optimal") : (fixedSkew > 0 ? "Kemiringan halaman diluruskan" : "Halaman sudah lurus"));
-        }
-
-        private void ShowWatermarkDialog()
-        {
-            using var dlg = new Form
-            {
-                Text = "Cap Watermark Diagonal",
-                Size = new Size(460, 250),
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                BackColor = Theme.SURFACE
-            };
-
-            var lbl = new Label { Text = "Teks Watermark Diagonal:", Font = Theme.FontLabel(10f), Location = new Point(20, 18), AutoSize = true };
-            var txt = new TextBox
-            {
-                Text = _pages.FirstOrDefault()?.Watermark ?? "HANYA UNTUK VERIFIKASI",
-                Font = Theme.FontBody(10.5f),
-                Location = new Point(20, 44),
-                Width = 400
-            };
-
-            var presetsFlow = new FlowLayoutPanel { Location = new Point(20, 80), Size = new Size(405, 65) };
-            string[] presets = { "HANYA UNTUK VERIFIKASI", "DOKUMEN RAHASIA", "CPNS 2026", "SALINAN / COPY", "DRAFT" };
-            foreach (string p in presets)
-            {
-                string val = p;
-                var chip = Theme.CreateButton(val, false, Theme.ACCENT, 28);
-                chip.Font = Theme.FontLabel(8f);
-                chip.Click += (s, e) => txt.Text = val;
-                presetsFlow.Controls.Add(chip);
-            }
-
-            var btnApply = Theme.CreateButton("Terapkan ke Semua", true, Theme.ACCENT, 36, 200);
-            btnApply.Location = new Point(20, 156);
-            btnApply.Click += (s, e) =>
-            {
-                string w = txt.Text.Trim();
-                foreach (var pg in _pages) pg.Watermark = string.IsNullOrWhiteSpace(w) ? null : w;
-                _cropCanvas.ActiveWatermark = string.IsNullOrWhiteSpace(w) ? null : w;
-                _cropCanvas.Invalidate();
-                dlg.Close();
-            };
-
-            var btnClear = Theme.CreateButton("Hapus Watermark", false, Theme.RED, 36, 180);
-            btnClear.Location = new Point(240, 156);
-            btnClear.Click += (s, e) =>
-            {
-                foreach (var pg in _pages) pg.Watermark = null;
-                _cropCanvas.ActiveWatermark = null;
-                _cropCanvas.Invalidate();
-                dlg.Close();
-            };
-
-            dlg.Controls.AddRange(new Control[] { lbl, txt, presetsFlow, btnApply, btnClear });
-            dlg.ShowDialog(this);
-        }
-
-        private void LayoutKtp2SidedA4()
-        {
-            if (_pages.Count < 2)
-            {
-                // Jika baru ada 1 halaman, tawarkan memilih foto sisi belakang atau gunakan halaman 1 sebagai simulasi 2 sisi
-                var res = MessageBox.Show(
-                    this,
-                    "Tata KTP 2-Sisi idealnya menggunakan 2 foto (Sisi Depan & Sisi Belakang).\nIngin memilih foto Sisi Belakang sekarang? (Pilih 'No' untuk menata halaman saat ini sebagai Sisi Depan & Belakang).",
-                    "Tata KTP 2-Sisi A4",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-                if (res == DialogResult.Cancel) return;
-                if (res == DialogResult.Yes)
+                catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException)
                 {
-                    AddPhotoPages();
-                    if (_pages.Count < 2) return;
+                    rejected.Add(Path.GetFileName(file));
                 }
-                else
-                {
-                    _pages.Add(new ScanPage(_pages[0].FilePath));
-                }
+                progress(index + 1, files.Length);
             }
-
-            var ktpPage = PdfEngine.RenderKtpA4(_pages[0], _pages[1], 1800, _bright, _contrast);
-            _pages.Clear();
-            _pages.Add(ktpPage);
-            _cur = 0;
-            ShowCurrentPage();
-            Theme.Toast(this, "✓ KTP Sisi Depan & Belakang berhasil ditata dalam 1 Halaman A4!");
-        }
-
-        private void RunAndShowOcrModal()
+            return (pages, rejected);
+        });
+        if (!ok) return [];
+        if (result.rejected.Count > 0)
         {
-            using var bmp = PdfEngine.ProcessScanPage(_pages[_cur], _mode, 1800, _bright, _contrast);
-            var ocr = PdfEngine.RunOcr(bmp);
-            if (string.IsNullOrWhiteSpace(ocr.Text))
-            {
-                Theme.Toast(this, PdfEngine.LastOcrError ?? "Tidak ada teks terdeteksi pada halaman ini");
-                return;
-            }
+            string names = string.Join(", ", result.rejected.Take(5));
+            if (result.rejected.Count > 5) names += "…";
+            MessageBox.Show(owner, $"Foto yang tidak dapat dibaca ({result.rejected.Count})\n{names}", "Impor foto",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        return result.pages;
+    }
 
-            using var dlg = new Form
+    private static Button ActionButton(string label, Action run, bool primary = false)
+    {
+        var button = Theme.CreateButton(label, primary, primary ? Theme.ACCENT : Theme.TEXT, Theme.S(34));
+        button.Click += (_, _) => run();
+        return button;
+    }
+
+    private void Build()
+    {
+        var toolbar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top, AutoSize = true, WrapContents = true, BackColor = Theme.TOOLBAR,
+            Padding = new Padding(Theme.S(12), Theme.S(6), Theme.S(12), Theme.S(6))
+        };
+        toolbar.Controls.AddRange([
+            ActionButton("Impor foto…", () => AddPages(Ui.PickFiles(this, "Tambah foto dokumen", ImageFilter))),
+            ActionButton("Kamera…", () => AddPages(ScanCameraForm.TakePhotos(this, _nextPhotoPath))),
+            ActionButton("Teks OCR…", () => ShowRecognizedText()),
+            ActionButton("Cetak halaman…", PrintCurrent),
+            ActionButton("Ekspor…", ShowExport, primary: true)
+        ]);
+
+        var pageBar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, AutoSize = true, WrapContents = true, BackColor = Theme.TOOLBAR,
+            Padding = new Padding(Theme.S(8), Theme.S(6), Theme.S(8), Theme.S(6))
+        };
+        _pageSelector.Width = Theme.S(130);
+        _pageSelector.Margin = new Padding(Theme.S(3), Theme.S(8), Theme.S(6), 0);
+        _pageSelector.SelectedIndexChanged += (_, _) =>
+        {
+            if (_updatingPages || _pageSelector.SelectedIndex < 0) return;
+            _index = _pageSelector.SelectedIndex;
+            ShowPage();
+        };
+        _previous = ActionButton("‹", () => _pageSelector.SelectedIndex = _index - 1);
+        _next = ActionButton("›", () => _pageSelector.SelectedIndex = _index + 1);
+        _previous.AccessibleName = "Halaman sebelumnya";
+        _next.AccessibleName = "Halaman berikutnya";
+        pageBar.Controls.AddRange([_previous, _pageSelector, _next]);
+
+        _workspace.Panel1.Controls.Add(_canvas);
+        _workspace.Panel1.Controls.Add(pageBar);
+        _workspace.Panel1.Padding = new Padding(Theme.S(8));
+        _workspace.SplitterWidth = Math.Max(4, Theme.S(6));
+        _workspace.SizeChanged += (_, _) => ArrangeWorkspace();
+        var inspector = new Panel { Dock = DockStyle.Fill, Padding = new Padding(Theme.S(10)), BackColor = Theme.SURFACE };
+        var tabs = new Segmented { Dock = DockStyle.Top, Items = ["Halaman", "Filter"], AccessibleName = "Alat pindai" };
+        var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        _cropTools = BuildPageTools(scroll);
+        _filterTools = BuildFilterTools(scroll);
+        _filterTools.Hide();
+        tabs.SelectedChanged += index => { _cropTools.Visible = index == 0; _filterTools.Visible = index == 1; scroll.AutoScrollPosition = Point.Empty; };
+        inspector.Controls.Add(scroll);
+        inspector.Controls.Add(tabs);
+        _workspace.Panel2.Controls.Add(inspector);
+        Controls.Add(_workspace);
+        Controls.Add(toolbar);
+    }
+
+    private static FlowLayoutPanel ToolList(Panel scroll)
+    {
+        var content = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false,
+            Padding = new Padding(0, Theme.S(10), Theme.S(8), Theme.S(10))
+        };
+        scroll.Controls.Add(content);
+        return content;
+    }
+
+    private static void Group(FlowLayoutPanel list, string title, params Control[] actions)
+    {
+        list.Controls.Add(new Label
+        {
+            Text = title, Font = Theme.FontHead(10f), ForeColor = Theme.TEXT, AutoSize = true,
+            Margin = new Padding(Theme.S(4), Theme.S(10), 0, Theme.S(4)), UseMnemonic = false
+        });
+        var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = Padding.Empty };
+        row.Controls.AddRange(actions);
+        list.Controls.Add(row);
+        void LayoutRow() => row.MaximumSize = new Size(Math.Max(Theme.S(72), list.ClientSize.Width - Theme.S(20)), 0);
+        list.SizeChanged += (_, _) => LayoutRow();
+        LayoutRow();
+    }
+
+    private Panel BuildPageTools(Panel scroll)
+    {
+        var content = ToolList(scroll);
+        _moveUp = ActionButton("Majukan", () => MovePage(-1));
+        _moveDown = ActionButton("Mundurkan", () => MovePage(1));
+        _remove = ActionButton("Hapus halaman", RemovePage);
+        Group(content, "Urutan", _moveUp, _moveDown, _remove);
+        Group(content, "Orientasi",
+            ActionButton("Putar 90°", RotatePage),
+            ActionButton("Cermin", FlipPage),
+            ActionButton("Halaman penuh", () => { Current.Crop = new RectangleF(0, 0, 1, 1); _canvas.Crop = Current.Crop; _canvas.Invalidate(); }));
+        Group(content, "Perapihan",
+            ActionButton("Cari tepi", () => DetectCurrent(crop: true, straighten: false)),
+            ActionButton("Luruskan", () => DetectCurrent(crop: false, straighten: true)),
+            ActionButton("Tata KTP A4…", LayoutIdCard));
+        _redact = ActionButton("Tutup area", () =>
+        {
+            _canvas.IsRedactMode = !_canvas.IsRedactMode;
+            UpdateRedactionButton();
+            if (_canvas.IsRedactMode) Theme.Toast(this, "Seret pada pratinjau untuk menutup area.");
+        });
+        Group(content, "Markah dan sensur", _redact, ActionButton("Bersihkan sensur", () =>
+        {
+            Current.Redactions.Clear();
+            _canvas.ActiveRedactions.Clear();
+            _canvas.Invalidate();
+        }), ActionButton("Watermark…", () =>
+        {
+            string? text = Ui.AskText(this, "Watermark halaman", "Kosongkan isian untuk menghapus watermark.", value: Current.Watermark ?? "");
+            if (text == null) return;
+            Current.Watermark = text.Trim();
+            _canvas.ActiveWatermark = Current.Watermark;
+            _canvas.Invalidate();
+        }));
+        Group(content, "Struk", ActionButton("Baca struk ke Excel…", () => ShowRecognizedText(editReceipt: true)));
+        return content;
+    }
+
+    private Panel BuildFilterTools(Panel scroll)
+    {
+        var content = ToolList(scroll);
+        var mode = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList, Width = Theme.S(180), AccessibleName = "Filter dokumen"
+        };
+        mode.Items.AddRange(["Warna asli", "Abu-abu", "Hitam putih", "Warna dokumen"]);
+        mode.SelectedIndex = _mode;
+        mode.SelectedIndexChanged += (_, _) => { _mode = mode.SelectedIndex; QueuePreview(); };
+        Group(content, "Filter dokumen", mode);
+        AddSlider("Kecerahan", value => _brightness = value);
+        AddSlider("Kontras", value => _contrast = value);
+        return content;
+
+        void AddSlider(string label, Action<int> update)
+        {
+            var slider = new TrackBar
             {
-                Text = $"Teks Hasil OCR Dokumen — Halaman {_cur + 1}",
-                Size = new Size(640, 620),
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                BackColor = Theme.SURFACE
+                Minimum = -50, Maximum = 50, Value = 0, SmallChange = 2, LargeChange = 10,
+                TickStyle = TickStyle.None, Width = Theme.S(180), AccessibleName = label
             };
+            slider.ValueChanged += (_, _) => { update(slider.Value); QueuePreview(); };
+            Group(content, label, slider);
+        }
+    }
 
-            var flow = new FlowLayoutPanel
+    private void ArrangeWorkspace()
+    {
+        if (_arranging || !_workspace.IsHandleCreated) return;
+        bool stacked = _workspace.Width < Theme.S(780);
+        var orientation = stacked ? Orientation.Horizontal : Orientation.Vertical;
+        if (_workspace.Orientation == orientation && _workspace.Tag != null) return;
+        _arranging = true;
+        try
+        {
+            _workspace.Orientation = orientation;
+            int extent = stacked ? _workspace.ClientSize.Height : _workspace.ClientSize.Width;
+            if (extent <= _workspace.SplitterWidth) return;
+            int desired = extent - (stacked ? Theme.S(216) : Theme.S(292));
+            _workspace.SplitterDistance = Math.Clamp(desired, 0, Math.Max(0, extent - _workspace.SplitterWidth));
+            _workspace.Tag = orientation;
+        }
+        finally { _arranging = false; }
+    }
+
+    private void QueuePreview()
+    {
+        _previewTimer.Stop();
+        _previewTimer.Start();
+    }
+
+    private void ShowPage()
+    {
+        _previewTimer.Stop();
+        var page = Current;
+        try
+        {
+            using var preview = PdfEngine.Decode(page.FilePath, PreviewSize);
+            _canvas.ActiveRedactions.Clear();
+            _canvas.ActiveRedactions.AddRange(page.Redactions);
+            _canvas.ActiveWatermark = page.Watermark;
+            _canvas.IsRedactMode = false;
+            _canvas.SetBitmap(preview, page.Rot, page.Flip, page.Crop, page.Skew, _mode, _brightness, _contrast);
+            _canvas.OnCropChanged = () =>
             {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoScroll = true,
-                Padding = new Padding(20)
+                page.Crop = _canvas.Crop;
+                page.Redactions.Clear();
+                page.Redactions.AddRange(_canvas.ActiveRedactions);
             };
+        }
+        catch (Exception ex)
+        {
+            _canvas.ClearBitmap();
+            Ui.ShowError(this, ex);
+        }
+        UpdateRedactionButton();
+        _previous.Enabled = _moveUp.Enabled = _index > 0;
+        _next.Enabled = _moveDown.Enabled = _index < _pages.Count - 1;
+        _remove.Enabled = _pages.Count > 1;
+    }
 
-            var txtOcr = new TextBox
-            {
-                Multiline = true,
-                ScrollBars = ScrollBars.Vertical,
-                Text = ocr.Text.Replace("\n", Environment.NewLine),
-                Font = Theme.FontBody(10.5f),
-                Size = new Size(580, 160),
-                BackColor = Theme.SURFACE2
-            };
-            flow.Controls.Add(txtOcr);
+    private void UpdateRedactionButton()
+    {
+        _redact.Text = _canvas.IsRedactMode ? "Selesai menutup area" : "Tutup area";
+        _redact.BackColor = _canvas.IsRedactMode ? Theme.ERROR_BG : Theme.SURFACE2;
+        _redact.ForeColor = _canvas.IsRedactMode ? Theme.ERROR : Theme.TEXT;
+    }
 
-            bool translated = false;
-            var btnTranslate = Theme.CreateButton("🌐 Terjemahkan Dokumen (Inggris ↔ Indonesia)", false, Theme.INDIGO, 36, 580);
-            btnTranslate.Margin = new Padding(0, 10, 0, 10);
-            btnTranslate.Click += (s, e) =>
-            {
-                translated = !translated;
-                txtOcr.Text = PdfEngine.TranslateDocText(ocr.Text, translated).Replace("\n", Environment.NewLine);
-            };
-            flow.Controls.Add(btnTranslate);
+    private void UpdatePageSelector()
+    {
+        _updatingPages = true;
+        _pageSelector.BeginUpdate();
+        try
+        {
+            _pageSelector.Items.Clear();
+            for (int index = 0; index < _pages.Count; index++)
+                _pageSelector.Items.Add($"Halaman {index + 1} / {_pages.Count}");
+            _pageSelector.SelectedIndex = _index;
+        }
+        finally { _pageSelector.EndUpdate(); _updatingPages = false; }
+    }
 
-            // Ringkasan Poin Krusial Dokumen
-            var summary = PdfEngine.ExtractDocSummary(ocr.Text);
-            var sumCard = new CardPanel { Width = 580, Height = 96, BackColor = Theme.AMBER_BG, BorderColor = Theme.AMBER, Margin = new Padding(0, 0, 0, 10) };
-            sumCard.Controls.Add(new Label
+    private void AddPages(string[]? files)
+    {
+        if (files == null || files.Length == 0) return;
+        var pages = ImportPages(this, files);
+        if (pages.Count == 0) return;
+        _index = _pages.Count;
+        _pages.AddRange(pages);
+        UpdatePageSelector();
+        ShowPage();
+    }
+
+    private void MovePage(int direction)
+    {
+        int target = _index + direction;
+        if (target < 0 || target >= _pages.Count) return;
+        (_pages[_index], _pages[target]) = (_pages[target], _pages[_index]);
+        _index = target;
+        UpdatePageSelector();
+        ShowPage();
+    }
+
+    private void RemovePage()
+    {
+        if (_pages.Count <= 1) return;
+        _pages.RemoveAt(_index);
+        _index = Math.Min(_index, _pages.Count - 1);
+        UpdatePageSelector();
+        ShowPage();
+    }
+
+    private void RotatePage()
+    {
+        var page = Current;
+        TransformAreas(page, rect => RectangleF.FromLTRB(1 - rect.Bottom, rect.Left, 1 - rect.Top, rect.Right));
+        page.Rot = (page.Rot + (page.Flip ? 270 : 90)) % 360;
+        ShowPage();
+    }
+
+    private void FlipPage()
+    {
+        var page = Current;
+        TransformAreas(page, rect => RectangleF.FromLTRB(1 - rect.Right, rect.Top, 1 - rect.Left, rect.Bottom));
+        page.Skew = -page.Skew;
+        page.Flip = !page.Flip;
+        ShowPage();
+    }
+
+    private static void TransformAreas(ScanPage page, Func<RectangleF, RectangleF> transform)
+    {
+        page.Crop = transform(page.Crop);
+        for (int index = 0; index < page.Redactions.Count; index++)
+            page.Redactions[index] = transform(page.Redactions[index]);
+    }
+
+    private static void DetectGeometry(ScanPage page, Bitmap source, bool crop, bool straighten)
+    {
+        var rawOrientation = PdfEngine.Orient(source, page.Rot, page.Flip);
+        using var owned = ReferenceEquals(rawOrientation, source) ? null : rawOrientation;
+        float skew = straighten ? ScanAi.DetectSkew(rawOrientation, ScanAi.DetectCrop(rawOrientation)) : page.Skew;
+        if (Math.Abs(skew - page.Skew) >= 0.05f)
+        {
+            var full = new RectangleF(0, 0, 1, 1);
+            float angle = (skew - page.Skew) * MathF.PI / 180;
+            float cos = MathF.Cos(angle), sin = MathF.Sin(angle), ratio = rawOrientation.Width / (float)rawOrientation.Height;
+            TransformAreas(page, rect =>
             {
-                Text = "📌 RINGKASAN POIN KRUSIAL DOKUMEN\n" +
-                       $"• Nomor/Pasal: {(summary.Numbers.Count > 0 ? string.Join(", ", summary.Numbers) : "-")}\n" +
-                       $"• Tanggal: {(summary.Dates.Count > 0 ? string.Join(", ", summary.Dates) : "-")}\n" +
-                       $"• Nominal: {(summary.Amounts.Count > 0 ? string.Join(", ", summary.Amounts) : "-")}",
-                Font = Theme.FontLabel(9f),
-                ForeColor = Theme.TEXT,
-                Location = new Point(12, 10),
-                Size = new Size(550, 76)
+                if (rect == full) return rect;
+                PointF Rotate(float x, float y) => new(0.5f + (x - 0.5f) * cos - (y - 0.5f) * sin / ratio,
+                    0.5f + (x - 0.5f) * sin * ratio + (y - 0.5f) * cos);
+                PointF[] points = [Rotate(rect.Left, rect.Top), Rotate(rect.Right, rect.Top), Rotate(rect.Left, rect.Bottom), Rotate(rect.Right, rect.Bottom)];
+                return RectangleF.Intersect(full, RectangleF.FromLTRB(points.Min(p => p.X), points.Min(p => p.Y), points.Max(p => p.X), points.Max(p => p.Y)));
             });
-            flow.Controls.Add(sumCard);
+            if (page.Crop.Width < 0.08f || page.Crop.Height < 0.08f) page.Crop = full;
+            page.Skew = skew;
+        }
+        if (!crop) return;
+        var rotated = PdfEngine.Deskew(rawOrientation, page.Skew);
+        using var ownedRotation = ReferenceEquals(rotated, rawOrientation) ? null : rotated;
+        if (ScanAi.DetectCrop(rotated) is { Width: >= 0.08f, Height: >= 0.08f } bounds) page.Crop = bounds;
+    }
 
-            // Deteksi Struk / Nota Keuangan
-            var receipt = PdfEngine.ParseReceipt(ocr.Text);
-            var recCard = new CardPanel { Width = 580, Height = 106, BackColor = Theme.SKY_BG, BorderColor = Theme.SKY, Margin = new Padding(0, 0, 0, 12) };
-            recCard.Controls.Add(new Label
+    private void DetectCurrent(bool crop, bool straighten)
+    {
+        var page = Current;
+        if (Ui.Busy(this, "Menganalisis halaman…", _ =>
+        {
+            using var source = PdfEngine.Decode(page.FilePath, 900);
+            DetectGeometry(page, source, crop, straighten);
+        })) ShowPage();
+    }
+
+    private void LayoutIdCard()
+    {
+        if (_pages.Count < 2)
+        {
+            Theme.Toast(this, "Tambahkan foto sisi depan dan belakang terlebih dahulu.");
+            return;
+        }
+        using var dialog = new Dlg("Tata kartu identitas ke A4", "Pilih dua halaman yang akan ditata. Lembar A4 ditambahkan sebagai halaman baru.", 490);
+        var labels = _pages.Select((_, index) => $"Halaman {index + 1}").ToArray();
+        var front = dialog.Choice("Sisi depan", labels);
+        var back = dialog.Choice("Sisi belakang", labels, selected: 1);
+        dialog.Action("Tambahkan lembar A4", true, () =>
+        {
+            if (front.SelectedIndex == back.SelectedIndex) { Theme.Toast(dialog, "Pilih dua halaman yang berbeda."); return; }
+            var frontPage = _pages[front.SelectedIndex];
+            var backPage = _pages[back.SelectedIndex];
+            string path = _nextPhotoPath();
+            var (ok, page) = Ui.Busy(dialog, "Menata kartu identitas…", _ => PdfEngine.RenderKtpA4(frontPage, backPage, 1800, _brightness, _contrast, path));
+            if (!ok || page == null) return;
+            _pages.Add(page);
+            _index = _pages.Count - 1;
+            UpdatePageSelector();
+            ShowPage();
+            dialog.Close();
+        });
+        dialog.Action("Batal", false, dialog.Close, Theme.TEXT);
+        dialog.ShowDialog(this);
+    }
+
+    private void PrintCurrent()
+    {
+        var (ok, image) = Ui.Busy(this, "Menyiapkan halaman untuk cetak…", _ =>
+            PdfEngine.ProcessScanPage(Current, _mode, 2000, _brightness, _contrast));
+        using (image)
+            if (ok && image != null) PrintHelper.PrintBitmap(this, image, $"Pindai halaman {_index + 1}");
+    }
+
+    private void ShowRecognizedText(bool editReceipt = false)
+    {
+        var (ok, text) = Ui.Busy(this, "Mengenali teks di halaman…", _ =>
+        {
+            using var image = PdfEngine.ProcessScanPage(Current, _mode, 2000, _brightness, _contrast);
+            return WinOcrRunner.Recognize(image).Text;
+        });
+        if (!ok) return;
+        if (string.IsNullOrWhiteSpace(text)) { Theme.Toast(this, "Teks tidak terdeteksi pada halaman ini."); return; }
+        if (editReceipt) { ShowReceipt(text); return; }
+
+        using var dialog = new Dlg($"Teks halaman {_index + 1}", "Periksa hasil OCR sebelum menyalin atau menggunakannya.", 650);
+        var field = dialog.Field("Teks", text.ReplaceLineEndings(), multiline: true, lines: 8);
+        dialog.Row(
+            dialog.SmallButton("Baca lantang…", () => VoiceReaderManager.ShowVoiceReaderDialog(dialog, "Teks hasil pindai", field.Text)),
+            dialog.SmallButton("Ringkasan…", () =>
             {
-                Text = $"🧾 DETEKSI STRUK / NOTA KEUANGAN\nMerchant: {receipt.Merchant} • Tanggal: {receipt.Date}\nTotal Bayar: {receipt.Total}",
-                Font = Theme.FontLabel(9.5f),
-                ForeColor = Theme.SKY,
-                Location = new Point(12, 10),
-                Size = new Size(360, 76)
+                var summary = PdfEngine.ExtractDocSummary(field.Text);
+                using var info = new Dlg("Ringkasan hasil pindai", "", 470);
+                info.Label("Nomor", bold: true);
+                info.Label(string.Join(", ", summary.Numbers.DefaultIfEmpty("Tidak terdeteksi")));
+                info.Label("Tanggal", bold: true);
+                info.Label(string.Join(", ", summary.Dates.DefaultIfEmpty("Tidak terdeteksi")));
+                info.Label("Nominal", bold: true);
+                info.Label(string.Join(", ", summary.Amounts.DefaultIfEmpty("Tidak terdeteksi")));
+                info.Action("Tutup", true, info.Close);
+                info.ShowDialog(dialog);
+            }),
+            dialog.SmallButton("Terjemahkan istilah…", () =>
+            {
+                using var translate = new Dlg("Terjemahkan istilah", "Gunakan kamus istilah lokal untuk teks hasil pindai.", 470);
+                var direction = translate.Choice("Arah terjemahan", ["Inggris ke Indonesia", "Indonesia ke Inggris"]);
+                translate.Action("Terapkan", true, () => { field.Text = PdfEngine.TranslateDocText(field.Text, direction.SelectedIndex == 0); translate.Close(); });
+                translate.ShowDialog(dialog);
+            }));
+        dialog.Action("Salin teks", true, () =>
+        {
+            if (field.TextLength > 0) { Clipboard.SetText(field.Text); Theme.Toast(dialog, "Teks disalin."); }
+        });
+        dialog.Action("Baca sebagai struk…", false, () => ShowReceipt(field.Text));
+        dialog.ShowDialog(this);
+    }
+
+    private void ShowReceipt(string text)
+    {
+        var receipt = PdfEngine.ParseReceipt(text);
+        using var dialog = new Dlg("Ekspor struk ke Excel", "Periksa nama toko, tanggal, jumlah, dan rincian hasil OCR.", 630);
+        var merchant = dialog.Field("Toko", receipt.Merchant);
+        var date = dialog.Field("Tanggal", receipt.Date);
+        var total = dialog.Field("Total bayar", receipt.Total);
+        var items = dialog.Field("Rincian", string.Join(Environment.NewLine, receipt.Items), multiline: true, lines: 6);
+        dialog.Action("Simpan XLSX", true, () =>
+        {
+            var rows = new List<IReadOnlyList<string>> { new[] { "Toko", "Tanggal", "Total bayar" },
+                new[] { merchant.Text.Trim(), date.Text.Trim(), total.Text.Trim() }, new[] { "Rincian struk" } };
+            rows.AddRange(items.Lines.Where(line => !string.IsNullOrWhiteSpace(line)).Select(line => new[] { line.Trim() }));
+            string output = AppStorage.NewOut("struk", "xlsx");
+            if (!Ui.Busy(dialog, "Menyimpan rincian struk…", _ => XlsxWriter.Write(output, "Struk", rows, new HashSet<int> { 0, 2 }))) return;
+            SaveResult(output, "Pindai struk ke Excel");
+            dialog.Close();
+            DialogResult = DialogResult.OK;
+        });
+        dialog.Action("Batal", false, dialog.Close, Theme.TEXT);
+        dialog.ShowDialog(this);
+    }
+
+    private void ShowExport()
+    {
+        using var dialog = new Dlg("Ekspor hasil pindai", $"{_pages.Count} halaman siap diekspor.", 550);
+        var format = dialog.Choice("Format", ["PDF", "Word (.docx)", "Gambar JPG"]);
+        var name = dialog.Field("Nama berkas", $"Pindai_{DateTime.Now:yyyyMMdd_HHmmss}");
+        var aspect = dialog.Choice("Ukuran halaman", PdfEngine.ASPECTS.Select(option => option.Name));
+        var quality = dialog.Choice("Kualitas atau isi", []);
+        var ocr = dialog.Check("Sisipkan teks OCR agar PDF bisa dicari", false);
+        var lockPdf = dialog.Check("Lindungi PDF dengan password", false);
+        var password = dialog.Field("", password: true);
+        password.PlaceholderText = "Password, minimal 4 karakter";
+        void UpdateOptions()
+        {
+            bool pdf = format.SelectedIndex == PdfEngine.F_PDF;
+            quality.Items.Clear();
+            quality.Items.AddRange(format.SelectedIndex switch
+            {
+                PdfEngine.F_PDF => ["Tinggi", "Seimbang", "Ringan"],
+                PdfEngine.F_WORD => ["Teks hasil OCR", "Halaman sebagai gambar"],
+                _ => ["1920 px", "2560 px", "3840 px"]
             });
-            var btnToExcel = Theme.CreateButton("📊 Ekspor ke Excel (.xlsx)", true, Theme.TEAL, 34, 185);
-            btnToExcel.Location = new Point(380, 34);
-            btnToExcel.Click += (s, e) =>
-            {
-                dlg.Close();
-                using var sheetEd = new SheetEditorForm(templateKey: SheetEditorForm.TEMPLATE_INVOICE);
-                sheetEd.ShowDialog(this);
-            };
-            recCard.Controls.Add(btnToExcel);
-            flow.Controls.Add(recCard);
+            quality.SelectedIndex = pdf || format.SelectedIndex == PdfEngine.F_JPG ? 1 : 0;
+            ocr.Visible = lockPdf.Visible = pdf;
+            password.Visible = pdf && lockPdf.Checked;
+        }
+        format.SelectedIndexChanged += (_, _) => UpdateOptions();
+        lockPdf.CheckedChanged += (_, _) => password.Visible = lockPdf.Checked;
+        UpdateOptions();
+        dialog.Action("Ekspor", true, () =>
+        {
+            int kind = format.SelectedIndex, option = quality.SelectedIndex;
+            var layout = PdfEngine.ASPECTS[aspect.SelectedIndex];
+            string? encryption = kind == PdfEngine.F_PDF && lockPdf.Checked ? password.Text : null;
+            if (encryption is { Length: < 4 }) { Theme.Toast(dialog, "Password harus berisi minimal empat karakter."); return; }
+            string title = string.IsNullOrWhiteSpace(name.Text) ? "Pindai dokumen" : name.Text.Trim();
+            bool searchable = kind == PdfEngine.F_PDF && ocr.Checked;
+            if (!Export(dialog, title, kind, option, layout, searchable, encryption)) return;
+            dialog.Close();
+            DialogResult = DialogResult.OK;
+        });
+        dialog.Action("Batal", false, dialog.Close, Theme.TEXT);
+        dialog.ShowDialog(this);
+    }
 
-            // Baris Tombol Simpan Cepat (WPS Style)
-            var expRow = new FlowLayoutPanel { Width = 580, Height = 46, FlowDirection = FlowDirection.LeftToRight };
-            var bCopy = Theme.CreateButton("📋 Salin Teks", true, Theme.ACCENT, 36, 138);
-            bCopy.Click += (s, e) => { Clipboard.SetText(txtOcr.Text); Theme.Toast(dlg, "Teks OCR disalin ke clipboard"); };
-
-            var bSaveWord = Theme.CreateButton("📝 Simpan Word (.docx)", false, Theme.ACCENT, 36, 180);
-            bSaveWord.Click += (s, e) =>
-            {
-                dlg.Close();
-                ExecuteExport($"Scan_Word_{DateTime.Now:yyyyMMdd_HHmm}", PdfEngine.F_WORD, 0, PdfEngine.ASPECTS[0], true, null);
-            };
-
-            var bSavePdf = Theme.CreateButton("📄 Simpan PDF OCR", false, Theme.RED, 36, 180);
-            bSavePdf.Click += (s, e) =>
-            {
-                dlg.Close();
-                ExecuteExport($"Scan_PDF_{DateTime.Now:yyyyMMdd_HHmm}", PdfEngine.F_PDF, 1, PdfEngine.ASPECTS[0], true, null);
-            };
-
-            expRow.Controls.AddRange(new Control[] { bCopy, bSaveWord, bSavePdf });
-            flow.Controls.Add(expRow);
-
-            dlg.Controls.Add(flow);
-            dlg.ShowDialog(this);
+    private bool Export(Form owner, string title, int format, int option, AspectOpt layout, bool searchable, string? password)
+    {
+        if (format == PdfEngine.F_JPG)
+        {
+            string baseName = Path.GetFileNameWithoutExtension(AppStorage.NamedOut(title, "jpg"));
+            var (ok, count) = Ui.Busy(owner, "Mengekspor halaman JPG…", progress =>
+                PdfEngine.ExportJpg(_pages, baseName, _mode, _brightness, _contrast, option, layout, progress));
+            if (!ok) return false;
+            OutputJpgCount = count;
+            return count > 0;
         }
 
-        private void ShowSaveExportModal()
+        string output = AppStorage.NamedOut(title, format == PdfEngine.F_PDF ? "pdf" : "docx");
+        if (!Ui.Busy(owner, "Menyimpan dokumen hasil pindai…", progress =>
         {
-            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmm", CultureInfo.InvariantCulture);
-            int fmt = PdfEngine.F_PDF;
-            int opt = 1;
-            int aIdx = 0;
-
-            using var dlg = new Form
-            {
-                Text = "Simpan & Ekspor Dokumen (Gaya WPS Office)",
-                Size = new Size(540, 560),
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                BackColor = Theme.SURFACE
-            };
-
-            var pad = new Panel { Dock = DockStyle.Fill, Padding = new Padding(22) };
-
-            var lblFmt = new Label { Text = "1. Pilih Format Simpan:", Font = Theme.FontLabel(10f), Location = new Point(22, 16), AutoSize = true };
-            var cmbFmt = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(22, 40), Width = 480, Font = Theme.FontBody(10.5f) };
-            cmbFmt.Items.AddRange(new object[]
-            {
-                "📄 Dokumen PDF (.pdf)",
-                "📝 Teks / Microsoft Word (.docx)",
-                "📷 Gambar Foto (.jpg ke Documents\\DepupOffice\\Gambar)"
-            });
-            cmbFmt.SelectedIndex = 0;
-
-            var lblName = new Label { Text = "2. Nama Berkas:", Font = Theme.FontLabel(10f), Location = new Point(22, 84), AutoSize = true };
-            var txtName = new TextBox { Text = $"Scan_Dokumen_{stamp}", Location = new Point(22, 108), Width = 480, Font = Theme.FontBody(10.5f) };
-
-            var lblAspect = new Label { Text = "3. Rasio Aspek Halaman:", Font = Theme.FontLabel(10f), Location = new Point(22, 152), AutoSize = true };
-            var cmbAspect = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(22, 176), Width = 480, Font = Theme.FontBody(10f) };
-            foreach (var a in PdfEngine.ASPECTS)
-                cmbAspect.Items.Add(a.Name);
-            cmbAspect.SelectedIndex = 0;
-
-            var lblQuality = new Label { Text = "4. Kualitas & Resolusi:", Font = Theme.FontLabel(10f), Location = new Point(22, 220), AutoSize = true };
-            var cmbQuality = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(22, 244), Width = 480, Font = Theme.FontBody(10f) };
-
-            var lblEstSize = new Label { Text = "Perkiraan ukuran berkas: menghitung...", Font = Theme.FontLabel(9.5f), ForeColor = Theme.TEAL, Location = new Point(22, 280), AutoSize = true };
-
-            var chkOcr = new CheckBox
-            {
-                Text = "Sertakan lapisan teks OCR tak terlihat (PDF bisa dicari & disalin)",
-                Font = Theme.FontLabel(9.5f),
-                Location = new Point(22, 316),
-                AutoSize = true
-            };
-
-            var chkLock = new CheckBox
-            {
-                Text = "Kunci PDF dengan Password (Enkripsi AES-128)",
-                Font = Theme.FontLabel(9.5f),
-                Location = new Point(22, 348),
-                AutoSize = true
-            };
-
-            var txtPass = new TextBox
-            {
-                PlaceholderText = "Password PDF (minimal 4 karakter)",
-                PasswordChar = '●',
-                Location = new Point(22, 378),
-                Width = 480,
-                Visible = false,
-                Font = Theme.FontBody(10f)
-            };
-            chkLock.CheckedChanged += (s, e) => txtPass.Visible = chkLock.Checked;
-
-            void RefreshOptionsAndEstimate()
-            {
-                fmt = cmbFmt.SelectedIndex switch { 0 => PdfEngine.F_PDF, 1 => PdfEngine.F_WORD, _ => PdfEngine.F_JPG };
-                cmbQuality.Items.Clear();
-                if (fmt == PdfEngine.F_PDF)
-                {
-                    cmbQuality.Items.AddRange(new object[]
-                    {
-                        "Kualitas Tinggi (2000 px · detail maksimal)",
-                        "Kompresi Cerdas (1600 px · Rekomendasi cetak/arsip)",
-                        "Ukuran Sangat Ringan (1000 px · cocok WhatsApp & email)"
-                    });
-                    cmbQuality.SelectedIndex = 1;
-                }
-                else if (fmt == PdfEngine.F_WORD)
-                {
-                    cmbQuality.Items.AddRange(new object[]
-                    {
-                        "Teks bisa diedit (OCR otomatis ke paragraf Word)",
-                        "Halaman sebagai gambar utuh di dalam Word"
-                    });
-                    cmbQuality.SelectedIndex = 0;
-                }
-                else
-                {
-                    cmbQuality.Items.AddRange(new object[]
-                    {
-                        "1080p Full HD (1920 px)",
-                        "2K Quad HD (2560 px · Rekomendasi)",
-                        "4K Ultra HD (3840 px)"
-                    });
-                    cmbQuality.SelectedIndex = 1;
-                }
-                chkOcr.Visible = fmt == PdfEngine.F_PDF;
-                chkLock.Visible = fmt == PdfEngine.F_PDF;
-                txtPass.Visible = fmt == PdfEngine.F_PDF && chkLock.Checked;
-                UpdateEstimateLabel();
-            }
-
-            void UpdateEstimateLabel()
-            {
-                try
-                {
-                    opt = Math.Max(0, cmbQuality.SelectedIndex);
-                    aIdx = Math.Clamp(cmbAspect.SelectedIndex, 0, PdfEngine.ASPECTS.Count - 1);
-                    long estOne = PdfEngine.EstimatePageSize(_pages[0], fmt, opt, _mode, _bright, _contrast, PdfEngine.ASPECTS[aIdx], chkOcr.Checked);
-                    lblEstSize.Text = $"Perkiraan ukuran total ({_pages.Count} halaman): ≈ {AppStorage.FmtSize(estOne * _pages.Count)}";
-                }
-                catch
-                {
-                    lblEstSize.Text = "Perkiraan ukuran: Ringan";
-                }
-            }
-
-            cmbFmt.SelectedIndexChanged += (s, e) => RefreshOptionsAndEstimate();
-            cmbQuality.SelectedIndexChanged += (s, e) => UpdateEstimateLabel();
-            cmbAspect.SelectedIndexChanged += (s, e) => UpdateEstimateLabel();
-            chkOcr.CheckedChanged += (s, e) => UpdateEstimateLabel();
-            RefreshOptionsAndEstimate();
-
-            var btnConfirm = Theme.CreateButton("✓ Konfirmasi Simpan & Ekspor", true, Theme.ACCENT, 44, 480);
-            btnConfirm.Location = new Point(22, 435);
-            btnConfirm.Click += (s, e) =>
-            {
-                if (fmt == PdfEngine.F_PDF && chkLock.Checked && txtPass.Text.Trim().Length < 4)
-                {
-                    Theme.Toast(dlg, "Password minimal 4 karakter");
-                    return;
-                }
-                string cleanName = txtName.Text.Trim();
-                if (string.IsNullOrWhiteSpace(cleanName)) cleanName = $"Scan_Dokumen_{stamp}";
-                string? pw = (fmt == PdfEngine.F_PDF && chkLock.Checked) ? txtPass.Text.Trim() : null;
-                dlg.Close();
-                ExecuteExport(cleanName, fmt, Math.Max(0, cmbQuality.SelectedIndex), PdfEngine.ASPECTS[Math.Clamp(cmbAspect.SelectedIndex, 0, PdfEngine.ASPECTS.Count - 1)], chkOcr.Checked, pw);
-            };
-
-            pad.Controls.AddRange(new Control[]
-            {
-                lblFmt, cmbFmt, lblName, txtName, lblAspect, cmbAspect,
-                lblQuality, cmbQuality, lblEstSize, chkOcr, chkLock, txtPass, btnConfirm
-            });
-            dlg.Controls.Add(pad);
-            dlg.ShowDialog(this);
-        }
-
-        private void ExecuteExport(string cleanName, int fmt, int opt, AspectOpt aspect, bool ocr, string? password)
-        {
+            string staged = output + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                if (fmt == PdfEngine.F_PDF)
-                {
-                    string outPath = AppStorage.NamedOut(cleanName, "pdf");
-                    PdfEngine.ExportPdf(_pages, outPath, _mode, _bright, _contrast, opt, aspect, ocr, password);
-                    AppStorage.AddRecent(outPath);
-                    AppStorage.SetLastJob("Scan Dokumen PDF", outPath);
-                    OutputFilePath = outPath;
-                    DialogResult = DialogResult.OK;
-                    Close();
-                }
-                else if (fmt == PdfEngine.F_WORD)
-                {
-                    string outPath = AppStorage.NamedOut(cleanName, "docx");
-                    PdfEngine.ExportDocx(_pages, outPath, _mode, _bright, _contrast, asImage: opt == 1, aspect);
-                    AppStorage.AddRecent(outPath);
-                    AppStorage.SetLastJob("Scan ke Word (.docx)", outPath);
-                    OutputFilePath = outPath;
-                    DialogResult = DialogResult.OK;
-                    Close();
-                }
+                if (format == PdfEngine.F_PDF)
+                    PdfEngine.ExportPdf(_pages, staged, _mode, _brightness, _contrast, option, layout, searchable, password, progress);
                 else
-                {
-                    int n = PdfEngine.ExportJpg(_pages, cleanName, _mode, _bright, _contrast, opt, aspect);
-                    OutputJpgCount = n;
-                    DialogResult = DialogResult.OK;
-                    Close();
-                }
+                    PdfEngine.ExportDocx(_pages, staged, _mode, _brightness, _contrast, option == 1, layout, progress);
+                File.Move(staged, output, overwrite: false);
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, $"Gagal mengekspor hasil scan: {ex.Message}", "Ekspor Gagal", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
+            finally { if (File.Exists(staged)) File.Delete(staged); }
+        })) return false;
+        SaveResult(output, format == PdfEngine.F_PDF ? "Pindai dokumen ke PDF" : "Pindai dokumen ke Word");
+        return true;
+    }
+
+    private void SaveResult(string path, string title)
+    {
+        OutputFilePath = path;
+        AppStorage.AddRecent(path);
+        AppStorage.SetLastJob(title, path);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _previewTimer.Dispose();
+        base.Dispose(disposing);
     }
 }

@@ -1,7 +1,7 @@
 <Project>
   <!-- WebView2 (penampil Word/Excel, mesin Edge bawaan Windows): aplikasi WinForms tidak butuh rakitan WPF-nya.
        Paket menambahkannya otomatis dan memicu bentrok versi WindowsBase (MSB3277). -->
-  <Target Name="DropWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">
+  <Target Name="DropWebView2Wpf" BeforeTargets="ResolveAssemblyReferences" Condition="'$(UseWPF)' != 'true'">
     <ItemGroup>
       <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
     </ItemGroup>

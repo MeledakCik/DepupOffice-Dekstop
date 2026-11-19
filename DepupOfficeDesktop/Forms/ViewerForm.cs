@@ -18,6 +18,8 @@ namespace DepupOfficeDesktop.Forms
         public bool AllowPrint = true, AllowCopy = true;
         /// <summary>Ekspor PDF asli dengan password guru/pemilik (null = tombol disembunyikan).</summary>
         public Action<IWin32Window>? ExportOriginal;
+        public Func<string, bool, Task<bool>>? BookmarkChanged;
+        public Func<string, Task<bool>>? Rename;
         public Action? OnClosed;
     }
 
@@ -29,6 +31,7 @@ namespace DepupOfficeDesktop.Forms
     /// </summary>
     public class ViewerForm : Form
     {
+        internal event Action? DocumentReady;
         private readonly ViewerOptions _opt;
         private readonly bool _isPptx;
         private readonly string _filePath;
@@ -36,8 +39,17 @@ namespace DepupOfficeDesktop.Forms
         private readonly string _mime;
         private readonly bool _isPdf;
 
-        private List<Bitmap> _pdfPages = new();
-        private bool _locked = false; // PDF ber-password yang belum berhasil dibuka
+        private PagedDocument? _pagedDocument;
+        private PagedReaderCanvas? _pagedCanvas;
+        private readonly CancellationTokenSource _readerLifetime = new();
+        private Task<(PdfOpenStatus Status, PagedDocument? Document)>? _documentLoad;
+        private bool _closing;
+        private Label? _pageMessage;
+        private Button? _unlockButton;
+        private readonly List<Button> _pageActions = new();
+        private int PageCount => _pagedDocument?.Count ?? 0;
+        private OfficeReader.Sheet? _spreadsheet;
+        private DateTime _spreadsheetModified;
         private int _curPage = 0;
         private float _zoom = 1.0f;
         private int _paperTheme = 0; // 0 = Siang, 1 = Malam, 2 = Sepia, 3 = Eye-Care Hijau
@@ -48,6 +60,8 @@ namespace DepupOfficeDesktop.Forms
         private Label _zoomLabel = null!;
         private Button _btnBookmark = null!;
         private Button _btnTheme = null!;
+        private Button _previousPage = null!;
+        private Button _nextPage = null!;
         private Panel _stagePanel = null!;
         private Label _lblName = null!;
 
@@ -75,56 +89,67 @@ namespace DepupOfficeDesktop.Forms
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Theme.BG;
 
-            if (_isPdf && File.Exists(_filePath))
-            {
-                // PDF ber-password: minta password (dilewati otomatis bila sudah dibuka sebelumnya).
-                PdfEngine.EnsureUnlocked(null, _filePath);
-                _locked = PdfEngine.IsLocked(_filePath);
-                if (!_locked)
-                    _pdfPages = PdfEngine.RenderAllPages(_filePath, PdfEngine.BudgetDim(_filePath, 1600));
-            }
-            else if (_isPptx && File.Exists(_filePath))
-            {
-                try
-                {
-                    using var pr = new PptxRenderer(_filePath);
-                    for (int i = 0; i < pr.SlideCount; i++) _pdfPages.Add(pr.RenderSlide(i, 1600));
-                }
-                catch (Exception ex) { _pptxError = ex.Message; }
-            }
-
             BuildUi();
-            RenderStage();
+            if (_isPdf || _isPptx)
+                ShowPageMessage("Membuka dokumen…");
         }
 
-        private string? _pptxError;
         private IntPtr _securedHwnd;
 
-        protected override void OnShown(EventArgs e)
+        protected override void OnLoad(EventArgs e)
         {
-            base.OnShown(e);
+            base.OnLoad(e);
             if (_opt.Secure)
             {
                 // Jendela tertanam: perlindungan dipasang di jendela tingkat-atas (jendela utama).
                 var top = TopLevelControl as Form ?? this;
                 if (SecureDisplay.Protect(top.Handle, true)) _securedHwnd = top.Handle;
             }
+            if (_isPdf || _isPptx)
+                _ = OpenPagesAsync();
+            else
+            {
+                RenderStage();
+                DocumentReady?.Invoke();
+            }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
-            try { ClearStage(); } catch { }
-            foreach (var b in _pdfPages) b.Dispose();
-            _pdfPages.Clear();
+            _closing = true;
+            _readerLifetime.Cancel();
+            var document = _pagedDocument;
+            var pending = _pagedCanvas?.PendingRender ?? Task.CompletedTask;
+            ClearStage();
             if (_securedHwnd != IntPtr.Zero) SecureDisplay.Protect(_securedHwnd, false);
-            try { _opt.OnClosed?.Invoke(); } catch { }
+            _ = ReleasePagesAsync(pending, document);
+            if (_opt.OnClosed != null)
+            {
+                // Do not leave the protected temporary file behind when the main message loop exits.
+                // The open task runs on the thread pool and no page rendering reads the file after opening.
+                try { _documentLoad?.GetAwaiter().GetResult(); }
+                catch (Exception) { }
+                _opt.OnClosed();
+            }
             base.OnFormClosed(e);
+        }
+
+        private static async Task ReleasePagesAsync(Task rendering, PagedDocument? document)
+        {
+            try { await rendering.ConfigureAwait(false); }
+            finally { document?.Dispose(); }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _readerLifetime.Dispose();
+            base.Dispose(disposing);
         }
 
         private void StartSlideshow()
         {
-            if (_pdfPages.Count == 0) return;
-            using var f = new SlideshowForm(_pdfPages, _fileName, ownsSlides: false, secure: _opt.Secure, start: _curPage);
+            if (_pagedDocument == null) return;
+            using var f = new SlideshowForm(_pagedDocument, _fileName, secure: _opt.Secure, start: _curPage);
             f.ShowDialog(DlgOwner);
         }
 
@@ -153,7 +178,7 @@ namespace DepupOfficeDesktop.Forms
 
             _counterPill = new Label
             {
-                Text = _pdfPages.Count > 0 ? $"Hal 1 / {_pdfPages.Count}" : "Dokumen",
+                Text = _isPptx ? "Presentasi" : "Dokumen",
                 Font = Theme.FontLabel(9f),
                 ForeColor = Theme.ACCENT_LIGHT,
                 BackColor = Theme.BLUE_BG,
@@ -191,25 +216,40 @@ namespace DepupOfficeDesktop.Forms
                 _btnTheme.Text = GetThemeButtonText();
                 RenderStage();
             });
-            _btnBookmark = Act(_marked ? "★ Ditandai" : "☆ Tandai", _marked, Theme.ACCENT, () =>
+            _btnBookmark = Act(_marked ? "★ Ditandai" : "☆ Tandai", _marked, Theme.ACCENT, async () =>
             {
-                _marked = AppStorage.ToggleBookmark(_filePath);
-                _btnBookmark.Text = _marked ? "★ Ditandai" : "☆ Tandai";
-                _btnBookmark.BackColor = _marked ? Theme.ACCENT : Theme.BLUE_BG;
-                _btnBookmark.ForeColor = _marked ? Color.White : Theme.ACCENT_LIGHT;
+                _btnBookmark.Enabled = false;
+                try
+                {
+                    _marked = _opt.BookmarkChanged == null ? !_marked : await _opt.BookmarkChanged(_filePath, !_marked);
+                    AppStorage.SetBookmark(_filePath, _marked);
+                    if (IsDisposed) return;
+                    _btnBookmark.Text = _marked ? "★ Ditandai" : "☆ Tandai";
+                    _btnBookmark.BackColor = _marked ? Theme.ACCENT : Theme.BLUE_BG;
+                    _btnBookmark.ForeColor = _marked ? Color.White : Theme.ACCENT_LIGHT;
+                }
+                catch (Exception ex) { if (!IsDisposed) Ui.ShowError(DlgOwner, ex); }
+                finally { if (!IsDisposed) _btnBookmark.Enabled = true; }
             });
             var btnVoice = Act("🔊 Voice Reader", false, Theme.TEAL, StartVoiceReader);
             var btnPrint = Act("🖨️ Cetak", false, Theme.ACCENT, PrintCurrentDocument);
             var btnSign = Act("✍️ Tanda Tangan PDF", false, Theme.TEAL, ShowSignDialog);
-            btnSign.Visible = _isPdf && _pdfPages.Count > 0;
+            btnSign.Visible = _isPdf;
             var btnEdit = Act("✏️ Edit PDF", true, Theme.ACCENT, EditThisPdf);
-            btnEdit.Visible = _isPdf && _pdfPages.Count > 0;
+            btnEdit.Visible = _isPdf;
             var btnShow = Act("▶ Slideshow", false, Theme.INDIGO, StartSlideshow);
-            btnShow.Visible = (_isPdf || _isPptx) && _pdfPages.Count > 0;
+            btnShow.Visible = _isPdf || _isPptx;
+            var btnSlidesPdf = Act("Ekspor PDF…", false, Theme.RED, ExportSlidesToPdf);
+            btnSlidesPdf.Visible = _isPptx && !_opt.Secure;
             Button? btnMore = null;
             btnMore = Act("⋮ Lainnya", false, Theme.TEXT, () => ShowMoreMenu(btnMore!));
             btnMore.Visible = !_isPptx;
-            actions.Controls.AddRange(new Control[] { _btnTheme, _btnBookmark, btnVoice, btnPrint, btnShow, btnEdit, btnSign, btnMore });
+            if (_isPdf || _isPptx)
+            {
+                _pageActions.AddRange(new[] { btnVoice, btnPrint, btnShow, btnEdit, btnSign, btnMore, btnSlidesPdf });
+                foreach (var button in _pageActions) button.Enabled = false;
+            }
+            actions.Controls.AddRange(new Control[] { _btnTheme, _btnBookmark, btnVoice, btnPrint, btnShow, btnEdit, btnSign, btnSlidesPdf, btnMore });
             if (_opt.Secure)
             {
                 // Dokumen Terlindungi: tanpa sunting/tanda tangan/ekspor; cetak & baca-lantang mengikuti izin dokumen.
@@ -266,12 +306,13 @@ namespace DepupOfficeDesktop.Forms
                 Margin = new Padding(S(6), S(9), S(6), 0)
             };
 
-            var btnPrev = Nav("↑ Sebelumnya", Theme.ACCENT, () => GoToPage(_curPage - 1));
-            var btnNext = Nav("↓ Berikutnya", Theme.ACCENT, () => GoToPage(_curPage + 1));
-            btnPrev.Visible = btnNext.Visible = _pdfPages.Count > 1;
+            _previousPage = Nav("↑ Sebelumnya", Theme.ACCENT, () => _pagedCanvas?.StepPage(-1));
+            _nextPage = Nav("↓ Berikutnya", Theme.ACCENT, () => _pagedCanvas?.StepPage(1));
+            _previousPage.Visible = _nextPage.Visible = _isPdf || _isPptx;
+            _previousPage.Enabled = _nextPage.Enabled = false;
             statusBar.Controls.AddRange(new Control[]
             {
-                btnPrev, btnNext,
+                _previousPage, _nextPage,
                 Nav("−  Zoom", Theme.TEXT, () => SetZoom(_zoom - 0.25f)),
                 _zoomLabel,
                 Nav("+  Zoom", Theme.TEXT, () => SetZoom(_zoom + 0.25f))
@@ -339,6 +380,18 @@ namespace DepupOfficeDesktop.Forms
         private Control? _officeHost;
         private bool WebStageActive => _office != null && !_office.IsDisposed && _officeHost != null && _stagePanel.Controls.Contains(_officeHost);
         private bool UseWebOffice => (_mime == AppStorage.MIME_DOCX || _mime == AppStorage.MIME_XLSX) && OfficeWebView.RuntimeAvailable();
+        private bool IsSpreadsheet => _mime == AppStorage.MIME_XLSX || _mime == "text/csv";
+
+        private OfficeReader.Sheet? ReadSpreadsheet()
+        {
+            DateTime modified = File.GetLastWriteTimeUtc(_filePath);
+            if (_spreadsheet == null || modified != _spreadsheetModified)
+            {
+                _spreadsheet = _mime == "text/csv" ? OfficeReader.ReadCsv(_filePath) : OfficeReader.ReadXlsx(_filePath);
+                _spreadsheetModified = modified;
+            }
+            return _spreadsheet;
+        }
 
         private void ReloadOfficeStage()
         {
@@ -353,7 +406,11 @@ namespace DepupOfficeDesktop.Forms
         private Control BuildOfficeStage(bool isWord)
         {
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.BG };
-            var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = S(56), Padding = new Padding(S(8), S(8), S(8), 0), BackColor = Theme.BG, WrapContents = false };
+            var bar = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(S(8), S(6), S(8), S(6)), BackColor = Theme.TOOLBAR, WrapContents = true
+            };
             var office = new OfficeWebView { Dock = DockStyle.Fill, AllowCopy = !_opt.Secure || _opt.AllowCopy };
             _office = office;
 
@@ -367,26 +424,34 @@ namespace DepupOfficeDesktop.Forms
                 // berkas disimpan di editor → tampilkan versi terbaru
                 if (File.Exists(_filePath) && File.GetLastWriteTimeUtc(_filePath) != before) BeginInvoke(new Action(ReloadOfficeStage));
             };
-            var btnPdf = Theme.CreateButton("📄 Simpan sebagai PDF", false, Theme.RED, S(40));
+            var btnPdf = Theme.CreateButton("Ekspor PDF…", false, Theme.RED, S(36));
+            btnPdf.Enabled = false;
             btnPdf.Margin = new Padding(S(4), 0, S(4), 0);
             btnPdf.Click += async (s, e) =>
             {
-                string outPdf = AppStorage.NamedOut(AppStorage.BaseName(_fileName), "pdf");
+                string? path = PickPdfExportPath();
+                if (path == null) return;
+                string staged = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 btnPdf.Enabled = false;
                 try
                 {
-                    if (await office.SaveAsPdfAsync(outPdf))
+                    if (await office.SaveAsPdfAsync(staged))
                     {
-                        AppStorage.AddRecent(outPdf);
-                        Theme.Toast(DlgOwner, $"PDF dibuat (tata letak asli): {Path.GetFileName(outPdf)}");
+                        File.Move(staged, path, overwrite: true);
+                        RecordPdfExport(path);
                     }
-                    else Theme.Toast(DlgOwner, "Gagal membuat PDF.");
+                    else if (!_closing) Theme.Toast(DlgOwner, "PDF gagal diekspor.");
                 }
-                finally { btnPdf.Enabled = true; }
+                catch (Exception ex) { if (!_closing) Ui.ShowError(DlgOwner, ex); }
+                finally
+                {
+                    if (File.Exists(staged)) File.Delete(staged);
+                    if (!btnPdf.IsDisposed) btnPdf.Enabled = true;
+                }
             };
             var hint = new Label
             {
-                Text = "Ctrl + roda mouse untuk zoom • Ctrl+F cari teks",
+                Text = isWord ? "Ctrl+F untuk mencari teks" : "Ekspor PDF menggunakan lembar yang sedang tampil.",
                 AutoSize = true, Font = Theme.FontBody(9f), ForeColor = Theme.MUTED, Margin = new Padding(S(12), S(12), 0, 0)
             };
             if (!_opt.Secure) bar.Controls.AddRange(new Control[] { btnEdit, btnPdf });
@@ -396,6 +461,7 @@ namespace DepupOfficeDesktop.Forms
             office.DocumentReady += async n =>
             {
                 if (IsDisposed) return;
+                btnPdf.Enabled = true;
                 office.ApplyPaperTheme(_paperTheme);
                 if (n > 0) _counterPill.Text = $"{n} halaman";
                 if (isWord)
@@ -427,69 +493,112 @@ namespace DepupOfficeDesktop.Forms
             return host;
         }
 
+        private string? PickPdfExportPath()
+        {
+            using var dialog = new SaveFileDialog
+            {
+                Title = "Ekspor ke PDF", Filter = Ui.FilterPdf, DefaultExt = "pdf", AddExtension = true,
+                InitialDirectory = AppStorage.OutDir, FileName = AppStorage.BaseName(_fileName) + ".pdf"
+            };
+            return dialog.ShowDialog(DlgOwner) == DialogResult.OK ? dialog.FileName : null;
+        }
+
+        private void RecordPdfExport(string path)
+        {
+            AppStorage.AddRecent(path);
+            AppStorage.SetLastJob("Office ke PDF", path);
+            if (!_closing) Theme.Toast(DlgOwner, $"PDF tersimpan di {path}");
+        }
+
+        private void ExportSlidesToPdf()
+        {
+            if (_opt.Secure || _pagedDocument == null) return;
+            string? path = PickPdfExportPath();
+            if (path == null) return;
+            if (Ui.Busy(DlgOwner, "Mengekspor slide ke PDF…", progress =>
+                    PdfToolsX.ExportPresentation(_filePath, path, progress)))
+                RecordPdfExport(path);
+        }
+
         private void GoToPage(int pageIdx)
         {
-            if (_pdfPages.Count == 0) return;
-            _curPage = Math.Clamp(pageIdx, 0, _pdfPages.Count - 1);
-            _counterPill.Text = $"Hal {_curPage + 1} / {_pdfPages.Count}";
-            if (_stagePanel.Controls.Count > 0 && _stagePanel.Controls[0] is FlowLayoutPanel flow && _curPage < flow.Controls.Count)
+            _pagedCanvas?.GoToPage(pageIdx);
+        }
+
+        private void UpdatePageIndicator()
+        {
+            _counterPill.Text = $"{(_isPptx ? "Slide" : "Halaman")} {_curPage + 1} / {PageCount}";
+            _previousPage.Enabled = _curPage > 0;
+            _nextPage.Enabled = _curPage + 1 < PageCount;
+        }
+
+        private void ShowPageMessage(string message, bool allowUnlock = false)
+        {
+            if (_pageMessage == null)
             {
-                flow.ScrollControlIntoView(flow.Controls[_curPage]);
+                var box = new Panel { Dock = DockStyle.Top, Height = S(144), Padding = new Padding(S(18)) };
+                _pageMessage = new Label
+                {
+                    Dock = DockStyle.Top, Height = S(58), Font = Theme.FontBody(11f), ForeColor = Theme.MUTED,
+                    TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false
+                };
+                _unlockButton = Theme.CreateButton("Masukkan password", true, Theme.ACCENT, S(42), S(200));
+                _unlockButton.Location = new Point(S(18), S(88));
+                _unlockButton.Click += (s, e) => _ = OpenPagesAsync(askPassword: true);
+                box.Controls.AddRange(new Control[] { _unlockButton, _pageMessage });
+                _stagePanel.Controls.Add(box);
+            }
+            _pageMessage.Text = message;
+            _unlockButton!.Visible = allowUnlock;
+        }
+
+        private async Task OpenPagesAsync(bool askPassword = false)
+        {
+            try
+            {
+                if (askPassword && !PdfEngine.EnsureUnlocked(DlgOwner, _filePath)) return;
+                ShowPageMessage("Membuka dokumen…");
+                var token = _readerLifetime.Token;
+                _documentLoad = Task.Run(() => PagedDocument.Open(_filePath, token), token);
+                var (status, document) = await _documentLoad;
+                if (_closing || IsDisposed) { document?.Dispose(); return; }
+                if (document is not { Count: > 0 })
+                {
+                    document?.Dispose();
+                    bool locked = status is PdfOpenStatus.PasswordRequired or PdfOpenStatus.WrongPassword;
+                    ShowPageMessage(locked
+                        ? "PDF ini memerlukan password."
+                        : "Dokumen tidak dapat ditampilkan. Periksa format dan kondisi berkas.", locked);
+                    if (locked) _unlockButton?.Focus();
+                    return;
+                }
+
+                _pagedDocument = document;
+                ClearStage();
+                _stagePanel.Padding = Padding.Empty;
+                _stagePanel.AutoScroll = false;
+                _pagedCanvas = new PagedReaderCanvas(document, _zoom, _paperTheme) { Dock = DockStyle.Fill };
+                _pagedCanvas.PageChanged += page => { _curPage = page; UpdatePageIndicator(); };
+                _stagePanel.Controls.Add(_pagedCanvas);
+                foreach (var button in _pageActions) button.Enabled = true;
+                UpdatePageIndicator();
+                DocumentReady?.Invoke();
+            }
+            catch (OperationCanceledException) when (_closing) { }
+            catch (Exception ex)
+            {
+                if (!_closing && !IsDisposed) ShowPageMessage($"Dokumen gagal dibuka. {ex.Message}");
             }
         }
 
         private Bitmap ApplyThemeToPage(Bitmap src)
         {
-            if (_paperTheme == 0) return src;   // tanpa salinan; ClearStage tidak membuang halaman sumber
-            int w = src.Width, h = src.Height;
-            var dst = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            using var g = Graphics.FromImage(dst);
-            using var ia = new ImageAttributes();
-
-            ColorMatrix cm = _paperTheme switch
-            {
-                1 => new ColorMatrix(new float[][]
-                {
-                    new float[] { -1,  0,  0, 0, 0 },
-                    new float[] {  0, -1,  0, 0, 0 },
-                    new float[] {  0,  0, -1, 0, 0 },
-                    new float[] {  0,  0,  0, 1, 0 },
-                    new float[] {  1,  1,  1, 0, 1 }
-                }),
-                2 => new ColorMatrix(new float[][]
-                {
-                    new float[] { 0.92f, 0,     0,     0, 0 },
-                    new float[] { 0,     0.85f, 0,     0, 0 },
-                    new float[] { 0,     0,     0.72f, 0, 0 },
-                    new float[] { 0,     0,     0,     1, 0 },
-                    new float[] { 0.06f, 0.03f, -0.02f,0, 1 }
-                }),
-                _ => new ColorMatrix(new float[][]
-                {
-                    new float[] { 0.86f, 0,     0,     0, 0 },
-                    new float[] { 0,     0.95f, 0,     0, 0 },
-                    new float[] { 0,     0,     0.84f, 0, 0 },
-                    new float[] { 0,     0,     0,     1, 0 },
-                    new float[] { -0.02f,0.03f, -0.02f,0, 1 }
-                })
-            };
-
-            ia.SetColorMatrix(cm);
-            g.DrawImage(src, new Rectangle(0, 0, w, h), 0, 0, w, h, GraphicsUnit.Pixel, ia);
-            return dst;
-        }
-
-        private void TryUnlockAndReload()
-        {
-            if (!PdfEngine.EnsureUnlocked(DlgOwner, _filePath)) return;
-            _locked = PdfEngine.IsLocked(_filePath);
-            if (_locked) return;
-
-            foreach (var b in _pdfPages) b.Dispose();
-            _pdfPages = PdfEngine.RenderAllPages(_filePath, PdfEngine.BudgetDim(_filePath, 1600));
-            _curPage = 0;
-            _counterPill.Text = _pdfPages.Count > 0 ? $"Hal 1 / {_pdfPages.Count}" : "Dokumen";
-            RenderStage();
+            using var tint = PagedReaderCanvas.CreatePaperTint(_paperTheme);
+            if (tint == null) return src;
+            var result = new Bitmap(src.Width, src.Height, PixelFormat.Format32bppArgb);
+            using var graphics = Graphics.FromImage(result);
+            graphics.DrawImage(src, new Rectangle(Point.Empty, src.Size), 0, 0, src.Width, src.Height, GraphicsUnit.Pixel, tint);
+            return result;
         }
 
         /// <summary>
@@ -500,22 +609,29 @@ namespace DepupOfficeDesktop.Forms
         {
             var old = _stagePanel.Controls.Cast<Control>().ToList();
             _stagePanel.Controls.Clear();
-            var source = new HashSet<Image>(_pdfPages);
             void Dispose(Control c)
             {
                 foreach (var ch in c.Controls.Cast<Control>().ToList()) Dispose(ch);
                 if (c is PictureBox pb && pb.Image is { } img)
                 {
                     pb.Image = null;
-                    if (!source.Contains(img)) img.Dispose();   // halaman sumber dipakai tanpa salinan (tema Siang)
+                    img.Dispose();
                 }
                 c.Dispose();
             }
             foreach (var c in old) Dispose(c);
+            _pageMessage = null;
+            _unlockButton = null;
         }
 
         private void RenderStage()
         {
+            if (_isPdf || _isPptx)
+            {
+                _pagedCanvas?.SetAppearance(_zoom, _paperTheme);
+                UpdateZoomLabels();
+                return;
+            }
             if (WebStageActive)
             {
                 // Word/Excel di WebView: ganti tema tanpa memuat ulang dokumen
@@ -532,71 +648,6 @@ namespace DepupOfficeDesktop.Forms
                 _stagePanel.Padding = Padding.Empty;
                 _stagePanel.AutoScroll = false;
                 _stagePanel.Controls.Add(BuildOfficeStage(_mime == AppStorage.MIME_DOCX));
-            }
-            else if (_isPptx && _pdfPages.Count == 0)
-            {
-                _stagePanel.Controls.Add(new Label
-                {
-                    Text = "Presentasi tidak dapat ditampilkan." + (_pptxError != null ? "\n" + _pptxError : ""),
-                    Font = Theme.FontLabel(11f), ForeColor = Theme.RED, AutoSize = true
-                });
-            }
-            else if (_isPdf || _isPptx)
-            {
-                if (_locked)
-                {
-                    var errCard = new CardPanel { Width = S(720), Height = S(210), BackColor = Theme.RED_BG, BorderColor = Theme.RED };
-                    errCard.Controls.Add(new Label
-                    {
-                        Text = "🔒 PDF Dilindungi Password\n\nFile PDF ini dienkripsi dengan password. Klik tombol di bawah untuk memasukkan password dan membukanya di sini.",
-                        Font = Theme.FontLabel(11f),
-                        ForeColor = Theme.RED,
-                        Dock = DockStyle.Top,
-                        Height = S(120),
-                        TextAlign = ContentAlignment.MiddleCenter
-                    });
-                    var btnUnlock = Theme.CreateButton("🔑  Masukkan Password", true, Theme.ACCENT, S(42), S(240));
-                    btnUnlock.Location = new Point((S(720) - S(240)) / 2, S(140));
-                    btnUnlock.Click += (s, e) => TryUnlockAndReload();
-                    errCard.Controls.Add(btnUnlock);
-                    _stagePanel.Controls.Add(errCard);
-                }
-                else
-                {
-                    var flow = new FlowLayoutPanel
-                    {
-                        Dock = DockStyle.Top,
-                        FlowDirection = FlowDirection.TopDown,
-                        WrapContents = false,
-                        AutoSize = true
-                    };
-
-                    int baseWidth = (int)(S(760) * _zoom);
-                    for (int i = 0; i < _pdfPages.Count; i++)
-                    {
-                        int pageIndex = i;
-                        var srcBmp = _pdfPages[i];
-                        var themedBmp = ApplyThemeToPage(srcBmp);
-                        int targetH = (int)((float)srcBmp.Height / Math.Max(1, srcBmp.Width) * baseWidth);
-
-                        var pb = new PictureBox
-                        {
-                            Image = themedBmp,
-                            SizeMode = PictureBoxSizeMode.Zoom,
-                            Size = new Size(baseWidth, targetH),
-                            BackColor = GetPaperBackColor(),
-                            Margin = new Padding(S(12), 0, S(12), S(18)),
-                            BorderStyle = BorderStyle.FixedSingle
-                        };
-                        pb.Click += (s, e) =>
-                        {
-                            _curPage = pageIndex;
-                            _counterPill.Text = $"Hal {_curPage + 1} / {_pdfPages.Count}";
-                        };
-                        flow.Controls.Add(pb);
-                    }
-                    _stagePanel.Controls.Add(flow);
-                }
             }
             else if (_mime.StartsWith("image/"))
             {
@@ -615,49 +666,56 @@ namespace DepupOfficeDesktop.Forms
                 };
                 _stagePanel.Controls.Add(pb);
             }
-            else if (_mime == AppStorage.MIME_XLSX || _fileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+            else if (IsSpreadsheet)
             {
-                var sheet = _fileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase)
-                    ? OfficeReader.ReadCsv(_filePath)
-                    : OfficeReader.ReadXlsx(_filePath);
-
+                var sheet = ReadSpreadsheet();
                 var host = new Panel { Dock = DockStyle.Fill };
-                var topBanner = new CardPanel { Dock = DockStyle.Top, Height = S(68), BackColor = Theme.BLUE_BG, BorderColor = Theme.ACCENT };
+                var topBanner = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Top, AutoSize = true, WrapContents = true, BackColor = Theme.SURFACE,
+                    Padding = new Padding(S(8))
+                };
                 var lblBanner = new Label
                 {
-                    Text = $"📊 Pratinjau Spreadsheet: {sheet?.Name ?? "Sheet1"} ({sheet?.Rows.Count ?? 0} baris)",
-                    Font = Theme.FontLabel(11f),
-                    ForeColor = Theme.TEXT,
-                    AutoSize = true,
-                    Location = new Point(S(16), S(22))
+                    Text = $"{sheet?.Name ?? "Spreadsheet"}  ·  {sheet?.Rows.Count ?? 0} baris",
+                    Font = Theme.FontLabel(10f), ForeColor = Theme.TEXT, AutoSize = true,
+                    Margin = new Padding(S(8), S(12), S(12), 0), UseMnemonic = false
                 };
-                var btnEditExcel = Theme.CreateButton("✏️ Buka di Editor Excel", true, Theme.TEAL, S(40));
-                btnEditExcel.Location = new Point(S(400), S(14));
-                topBanner.Resize += (s, e) => btnEditExcel.Left = Math.Max(lblBanner.Right + S(12), topBanner.Width - btnEditExcel.Width - S(16));
-                btnEditExcel.Click += (s, e) =>
+                var edit = Theme.CreateButton("Edit spreadsheet", false, Theme.TEAL, S(36));
+                edit.Click += (s, e) =>
                 {
                     using var editor = new SheetEditorForm(_filePath);
                     editor.ShowDialog(DlgOwner);
                 };
-                topBanner.Controls.AddRange(new Control[] { lblBanner, btnEditExcel });
+                topBanner.Controls.AddRange(new Control[] { lblBanner, edit });
 
                 var dgv = new DataGridView
                 {
-                    Dock = DockStyle.Fill,
-                    ReadOnly = true,
-                    AllowUserToAddRows = false,
-                    BackgroundColor = GetPaperBackColor(),
-                    ForeColor = GetPaperForeColor(),
-                    AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                    Font = Theme.FontBody(10f * _zoom)
+                    Dock = DockStyle.Fill, ReadOnly = true, VirtualMode = true,
+                    AllowUserToAddRows = false, AllowUserToDeleteRows = false,
+                    BackgroundColor = GetPaperBackColor(), ForeColor = GetPaperForeColor(),
+                    Font = Theme.FontBody(10f * _zoom),
+                    RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None
                 };
-                if (sheet != null && sheet.Rows.Count > 0)
+                dgv.DefaultCellStyle.BackColor = GetPaperBackColor();
+                dgv.DefaultCellStyle.ForeColor = GetPaperForeColor();
+                dgv.RowTemplate.Height = Math.Max(S(24), (int)(S(27) * _zoom));
+                if (sheet is { Rows.Count: > 0 })
                 {
-                    int cols = Math.Clamp(sheet.Rows.Max(r => r.Count), 1, 12);
-                    for (int c = 0; c < cols; c++)
-                        dgv.Columns.Add(XlsxWriter.ColumnName(c), XlsxWriter.ColumnName(c));
-                    foreach (var r in sheet.Rows.Take(100))
-                        dgv.Rows.Add(r.Take(cols).Cast<object>().ToArray());
+                    int cols = Math.Clamp(sheet.Rows.Max(row => row.Count), 1, 16_384);
+                    for (int column = 0; column < cols; column++)
+                        dgv.Columns.Add(new DataGridViewTextBoxColumn
+                        {
+                            HeaderText = XlsxWriter.ColumnName(column),
+                            Width = Math.Max(S(64), (int)(S(136) * _zoom)),
+                            SortMode = DataGridViewColumnSortMode.NotSortable
+                        });
+                    dgv.CellValueNeeded += (s, e) =>
+                    {
+                        var row = sheet.Rows[e.RowIndex];
+                        if (e.ColumnIndex < row.Count) e.Value = row[e.ColumnIndex];
+                    };
+                    dgv.RowCount = sheet.Rows.Count;
                 }
 
                 host.Controls.Add(dgv);
@@ -740,46 +798,95 @@ namespace DepupOfficeDesktop.Forms
             _stagePanel.ResumeLayout();
         }
 
-        private void StartVoiceReader()
+        private async void StartVoiceReader()
         {
             string text = "";
             if (_isPptx)
             {
                 try { text = string.Join("\n\n", PptxRenderer.SlideTexts(_filePath).Select((t, i) => $"Slide {i + 1}:\n{t}")); } catch { }
             }
-            else if (_isPdf && _pdfPages.Count > 0)
+            else if (_isPdf && _pagedDocument is { } document)
             {
-                var sb = new System.Text.StringBuilder();
-                for (int i = 0; i < Math.Min(_pdfPages.Count, 10); i++)
+                var range = (First: _curPage, Last: _curPage);
+                if (document.Count > 1)
                 {
-                    var ocr = PdfEngine.RunOcr(_pdfPages[i]);
-                    sb.AppendLine($"Halaman {i + 1}:").AppendLine(ocr.Text).AppendLine();
+                    using var dialog = new Dlg("Bacakan PDF", "Pilih rentang halaman yang ingin didengar.", 435);
+                    var first = dialog.Number("Mulai halaman", 1, document.Count, _curPage + 1);
+                    var last = dialog.Number("Sampai halaman", 1, document.Count, Math.Min(document.Count, _curPage + 10));
+                    dialog.Action("Baca", true, () =>
+                    {
+                        if (first.Value > last.Value) { Theme.Toast(dialog, "Halaman awal harus sebelum atau sama dengan halaman akhir."); return; }
+                        range = ((int)first.Value - 1, (int)last.Value - 1);
+                        dialog.DialogResult = DialogResult.OK;
+                    });
+                    dialog.Action("Batal", false, dialog.Close, Theme.TEXT);
+                    if (dialog.ShowDialog(DlgOwner) != DialogResult.OK) return;
                 }
-                text = sb.ToString();
-                if (text.Replace("Halaman", "").Trim().Length < 12 && PdfEngine.LastOcrError != null)
+                var (ok, result) = Ui.Busy(DlgOwner, "Membaca teks pada halaman terpilih…", progress =>
                 {
-                    Theme.Toast(this, PdfEngine.LastOcrError);
+                    PdfFile? file = null;
+                    try { file = PdfToolsX.OpenPdf(_filePath); }
+                    catch (PdfException) { }
+                    if (file != null && !file.CanExtract) throw new InvalidOperationException("Pemilik PDF membatasi pengambilan teks.");
+                    var originalPages = file?.Pages();
+                    int count = range.Last - range.First + 1;
+                    var pages = new List<string>();
+                    string? ocrError = null;
+                    for (int i = range.First; i <= range.Last; i++)
+                    {
+                        string pageText = file != null && originalPages != null && i < originalPages.Count
+                            ? PdfLayout.ReadText(file, originalPages[i])
+                            : "";
+                        if (string.IsNullOrWhiteSpace(pageText) && ocrError == null)
+                        {
+                            using var bitmap = document.Render(i, 1700);
+                            pageText = PdfEngine.RunOcr(bitmap).Text;
+                            ocrError = PdfEngine.LastOcrError;
+                        }
+                        if (!string.IsNullOrWhiteSpace(pageText)) pages.Add($"Halaman {i + 1}:\n{pageText}");
+                        progress(i - range.First + 1, count);
+                    }
+                    return (Text: string.Join("\n\n", pages), OcrError: ocrError);
+                });
+                if (!ok) return;
+                if (string.IsNullOrWhiteSpace(result.Text))
+                {
+                    Theme.Toast(DlgOwner, result.OcrError ?? "Tidak ada teks yang dapat dibacakan.");
                     return;
                 }
+                text = result.Text;
             }
             else if (WebStageActive)
             {
                 var office = _office!;
-                _ = office.AllTextAsync().ContinueWith(t => BeginInvoke(new Action(() =>
-                    VoiceReaderManager.ShowVoiceReaderDialog(DlgOwner, _fileName, t.Result))), TaskScheduler.Default);
-                return;
+                try { text = await office.AllTextAsync(); }
+                catch (Exception ex) { if (!_closing) Ui.ShowError(DlgOwner, ex); return; }
+                if (_closing || IsDisposed) return;
             }
             else if (_mime == AppStorage.MIME_DOCX)
             {
                 text = OfficeReader.ReadDocxText(_filePath);
             }
-            else if (_mime == AppStorage.MIME_XLSX || _fileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+            else if (IsSpreadsheet)
             {
-                var sh = _fileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase)
-                    ? OfficeReader.ReadCsv(_filePath)
-                    : OfficeReader.ReadXlsx(_filePath);
+                var sh = ReadSpreadsheet();
                 if (sh != null)
                     text = string.Join("\n", sh.Rows.Select((r, i) => $"Baris {i + 1}: " + string.Join(", ", r)));
+            }
+            else if (_mime.StartsWith("image/"))
+            {
+                var (ok, result) = Ui.Busy(DlgOwner, "Mengenali teks pada gambar…", _ =>
+                {
+                    using var bitmap = PdfEngine.Decode(_filePath, 2200);
+                    return PdfEngine.RunOcr(bitmap).Text;
+                });
+                if (!ok) return;
+                if (string.IsNullOrWhiteSpace(result))
+                {
+                    Theme.Toast(DlgOwner, PdfEngine.LastOcrError ?? "Tidak ada teks yang dapat dibacakan.");
+                    return;
+                }
+                text = result;
             }
             else
             {
@@ -792,18 +899,17 @@ namespace DepupOfficeDesktop.Forms
         private void PrintCurrentDocument()
         {
             if (_opt.Secure && !_opt.AllowPrint) { Theme.Toast(DlgOwner, "Pemilik dokumen menonaktifkan cetak."); return; }
-            if (_isPptx)
+            if (_pagedDocument is { } paged)
             {
-                // slide yang sudah dirender langsung dicetak (dulu: lewat PDF sementara yang tidak pernah dihapus)
-                try { PrintHelper.PrintPages(DlgOwner, _pdfPages, _fileName); }
-                catch (Exception ex) { MessageBox.Show(DlgOwner, $"Gagal mencetak presentasi: {ex.Message}", "Cetak Dokumen", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+                try { PrintHelper.PrintDocumentPages(DlgOwner, paged, _fileName); }
+                catch (Exception ex) { Ui.ShowError(DlgOwner, ex); }
             }
-            else if (_isPdf)
-                PrintHelper.PrintPdf(DlgOwner, _filePath, _fileName);
             else if (WebStageActive)
                 _office!.Print();   // cetak sesuai tata letak halaman asli (tabel, gambar, header/footer)
             else if (_mime == AppStorage.MIME_DOCX)
                 PrintHelper.PrintText(DlgOwner, _fileName, OfficeReader.ReadDocxText(_filePath));
+            else if (IsSpreadsheet && ReadSpreadsheet() is { } sheet)
+                PrintHelper.PrintSpreadsheet(DlgOwner, _fileName, sheet.Rows);
             else if (_mime.StartsWith("image/"))
             {
                 using var bmp = PdfEngine.Decode(_filePath, 1800);
@@ -818,7 +924,7 @@ namespace DepupOfficeDesktop.Forms
 
         private void EditThisPdf()
         {
-            using var editor = new PdfEditorForm(_filePath);
+            using var editor = new PdfEditorForm(_filePath, DlgOwner);
             if (!editor.Ready) return;
             editor.ShowDialog(DlgOwner);
             if (!string.IsNullOrWhiteSpace(editor.SavedPath))
@@ -840,7 +946,7 @@ namespace DepupOfficeDesktop.Forms
 
             var lbl = new Label
             {
-                Text = $"Gambar Tanda Tangan pada Halaman {_curPage + 1} dari {_pdfPages.Count}:",
+                Text = $"Gambar Tanda Tangan pada Halaman {_curPage + 1} dari {PageCount}:",
                 Font = Theme.FontLabel(10f),
                 Location = new Point(20, 16),
                 AutoSize = true
@@ -868,7 +974,8 @@ namespace DepupOfficeDesktop.Forms
                     return;
                 }
                 string outPdf = AppStorage.NamedOut("TTD_" + AppStorage.BaseName(_fileName), "pdf");
-                PdfEngine.Sign(_filePath, sigBmp, _curPage + 1, cmbPos.SelectedIndex, outPdf);
+                int page = _curPage + 1, position = cmbPos.SelectedIndex;
+                if (!Ui.Busy(dlg, "Menempelkan tanda tangan…", _ => PdfEngine.Sign(_filePath, sigBmp, page, position, outPdf))) return;
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Tanda Tangan PDF", outPdf);
                 dlg.Close();
@@ -883,7 +990,8 @@ namespace DepupOfficeDesktop.Forms
                 using var sig = Ui.PickStamp(dlg, "Pilih Tanda Tangan / Stempel");
                 if (sig == null) return;
                 string outPdf = AppStorage.NamedOut("TTD_" + AppStorage.BaseName(_fileName), "pdf");
-                PdfEngine.Sign(_filePath, sig, _curPage + 1, cmbPos.SelectedIndex, outPdf);
+                int page = _curPage + 1, position = cmbPos.SelectedIndex;
+                if (!Ui.Busy(dlg, "Menempelkan tanda tangan…", _ => PdfEngine.Sign(_filePath, sig, page, position, outPdf))) return;
                 AppStorage.AddRecent(outPdf);
                 AppStorage.SetLastJob("Tanda Tangan PDF", outPdf);
                 dlg.Close();
@@ -898,34 +1006,42 @@ namespace DepupOfficeDesktop.Forms
         private void ShowMoreMenu(Control anchor)
         {
             var menu = new ContextMenuStrip();
-            menu.Items.Add("Ubah Nama Berkas (Rename)", null, (s, e) =>
+            menu.Items.Add("Ubah nama berkas", null, async (s, e) =>
             {
-                string? input = PromptInput("Ubah Nama Berkas", "Masukkan nama berkas baru:", AppStorage.BaseName(_fileName));
+                if (_opt.Rename != null)
+                {
+                    if (await _opt.Rename(_filePath) && !IsDisposed) Close();
+                    return;
+                }
+                string? input = PromptInput("Ubah Nama Berkas", "Masukkan nama berkas baru:", Path.GetFileNameWithoutExtension(_fileName));
                 if (!string.IsNullOrWhiteSpace(input))
                 {
                     string? renamed = AppStorage.RenameFile(_filePath, input);
-                    if (renamed != null)
-                        Theme.Toast(this, $"Nama berkas diubah ke {Path.GetFileName(renamed)}");
+                    if (renamed != null) Close();
+                    else Theme.Toast(this, "Nama tidak dapat disimpan. Periksa nama atau pilih nama lain.");
                 }
             });
-            if (_isPdf && _pdfPages.Count > 0)
+            if (_isPdf && PageCount > 0)
             {
                 menu.Items.Add("Lompat ke Halaman...", null, (s, e) =>
                 {
-                    string? input = PromptInput("Lompat Halaman", $"Masukkan nomor halaman (1 - {_pdfPages.Count}):", $"{_curPage + 1}");
-                    if (int.TryParse(input, out int p) && p >= 1 && p <= _pdfPages.Count)
+                    string? input = PromptInput("Lompat Halaman", $"Masukkan nomor halaman (1 - {PageCount}):", $"{_curPage + 1}");
+                    if (int.TryParse(input, out int p) && p >= 1 && p <= PageCount)
                         GoToPage(p - 1);
                 });
-                menu.Items.Add("Sedot Foto / Ekstrak Gambar ke Dokumen", null, (s, e) =>
+                menu.Items.Add("Ambil gambar tertanam…", null, (s, e) =>
                 {
-                    int n = PdfEngine.ExtractImagesFromPdf(_filePath, AppStorage.BaseName(_fileName));
-                    MessageBox.Show(DlgOwner, $"✓ {n} halaman/gambar berhasil diekstrak ke:\n{AppStorage.PicturesDir}", "Ekstrak Gambar PDF", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    var (ok, n) = Ui.Busy(DlgOwner, "Mengambil gambar asli di PDF…",
+                        progress => PdfToolsX.ExtractEmbeddedImages(_filePath, AppStorage.PicturesDir, AppStorage.BaseName(_fileName), progress));
+                    if (!ok) return;
+                    Theme.Toast(DlgOwner, n > 0 ? $"{n} gambar tersimpan di folder Gambar." : "Tidak ada gambar tertanam yang dapat disimpan.");
                 });
             }
             menu.Items.Add("Buka Lokasi Folder di Windows Explorer", null, (s, e) =>
             {
                 try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{_filePath}\""); } catch { }
             });
+            menu.Closed += (s, e) => menu.Dispose();
             menu.Show(anchor, new Point(0, anchor.Height));
         }
 

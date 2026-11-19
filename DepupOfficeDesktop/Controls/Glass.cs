@@ -27,8 +27,7 @@ namespace DepupOfficeDesktop.Controls
     }
 
     /// <summary>
-    /// Efek kaca ala Android (Glass.kt): latar "aurora" lembut (gumpalan biru, ungu, hijau, kuning) dan versi buramnya
-    /// untuk mengisi panel kaca (potongan latar buram + lapisan warna permukaan semi-transparan + tepi sorot).
+    /// Latar netral dan versi buramnya untuk mengisi panel kaca.
     /// Gambar disimpan beresolusi rendah (latar memang lembut), lalu diperbesar saat digambar: hemat memori & cepat.
     /// </summary>
     public sealed class GlassBackdrop : IDisposable
@@ -75,39 +74,9 @@ namespace DepupOfficeDesktop.Controls
             int w = (sz.Width + K_SHARP - 1) / K_SHARP, h = (sz.Height + K_SHARP - 1) / K_SHARP;
             var bmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
             using var g = Graphics.FromImage(bmp);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Theme.BG);
-            bool d = Theme.Dark;
-            // Pola gumpalan hanya bergantung pada LEBAR dan diulang tiap periode vertikal: halaman yang memanjang
-            // (mis. daftar berkas selesai dimuat) menghasilkan piksel yang sama persis di bagian yang sudah tampil.
-            float period = w * 1.2f;
-            var blobs = new (float X, float Y, float R, Color C, int A)[]
-            {
-                (0.10f, 0.08f, 0.55f, Theme.ACCENT, d ? 120 : 70),
-                (0.92f, 0.20f, 0.48f, Theme.INDIGO, d ? 100 : 70),
-                (0.72f, 0.80f, 0.60f, Theme.TEAL, d ? 70 : 55),
-                (0.18f, 0.72f, 0.42f, Theme.AMBER_FILL, d ? 50 : 55),
-                (0.50f, 0.45f, 0.36f, Theme.ACCENT, d ? 60 : 35),
-            };
-            float span = period;
-            for (float top = 0; top < h; top += period)
-            {
-                foreach (var b in blobs)
-                {
-                    float r = b.R * span;
-                    var rect = new RectangleF(b.X * w - r, top + b.Y * span - r, r * 2, r * 2);
-                    if (rect.Bottom < 0 || rect.Top > h) continue;
-                    using var path = new GraphicsPath();
-                    path.AddEllipse(rect);
-                    using var pg = new PathGradientBrush(path)
-                    {
-                        CenterColor = Color.FromArgb(b.A, b.C),
-                        SurroundColors = new[] { Color.FromArgb(0, b.C) },
-                        FocusScales = new PointF(0.05f, 0.05f)
-                    };
-                    g.FillPath(pg, path);
-                }
-            }
+            var bounds = new Rectangle(0, 0, w, h);
+            using var wash = new LinearGradientBrush(bounds, Theme.Mix(Theme.BG, Theme.SIDEBAR, 0.6), Theme.BG, LinearGradientMode.Horizontal);
+            g.FillRectangle(wash, bounds);
             return bmp;
         }
 

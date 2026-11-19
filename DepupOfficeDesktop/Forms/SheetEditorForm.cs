@@ -47,12 +47,13 @@ namespace DepupOfficeDesktop.Forms
         private DataGridView _grid = null!;
 
         private int _numCols = 4;
-        private readonly string[] _colNames = { "A", "B", "C", "D", "E", "F", "G", "H" };
+        private const int MaxColumns = 16_384;
         private readonly List<List<SheetCell>> _matrix = new();
 
         private int _activeRow = 0;
         private int _activeCol = 0;
         private bool _updatingUi = false;
+        private bool _dirty;
 
         private bool _currentGridlines;
         private string _currentCurrency;
@@ -88,13 +89,11 @@ namespace DepupOfficeDesktop.Forms
                 string ext = Path.GetExtension(_sourceFilePath).ToLowerInvariant();
                 var sheet = (ext == ".csv" || ext == ".txt")
                     ? OfficeReader.ReadCsv(_sourceFilePath)
-                    : OfficeReader.ReadXlsx(_sourceFilePath);
+                    : OfficeReader.ReadXlsx(_sourceFilePath, preserveFormulas: true);
 
-                if (sheet != null && sheet.Rows.Count > 0)
-                {
-                    FillMatrix(sheet.Rows, sheet.BoldRows);
-                    return string.IsNullOrWhiteSpace(sheet.Name) ? (_sourceName ?? "Spreadsheet") : sheet.Name;
-                }
+                if (sheet == null) throw new InvalidDataException("Spreadsheet tidak dapat dibaca.");
+                FillMatrix(sheet.Rows, sheet.BoldRows);
+                return string.IsNullOrWhiteSpace(sheet.Name) ? (_sourceName ?? "Spreadsheet") : sheet.Name;
             }
 
             switch (_templateKey)
@@ -121,8 +120,10 @@ namespace DepupOfficeDesktop.Forms
         {
             _matrix.Clear();
             int maxCols = rows.Count > 0 ? rows.Max(r => r.Count) : 4;
-            _numCols = Math.Clamp(maxCols, 2, 8);
-            for (int r = 0; r < Math.Min(rows.Count, 200); r++)
+            if (maxCols > MaxColumns || rows.Count > 1_048_576 || Math.Max(1, rows.Count) * (long)maxCols > 2_000_000)
+                throw new InvalidDataException("Rentang spreadsheet terlalu besar untuk dibuka di editor.");
+            _numCols = Math.Max(2, maxCols);
+            for (int r = 0; r < rows.Count; r++)
             {
                 var row = rows[r];
                 bool isBold = boldRows.Contains(r);
@@ -189,13 +190,13 @@ namespace DepupOfficeDesktop.Forms
             var topBar = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 58,
+                Height = Theme.S(58),
                 BackColor = Theme.SURFACE,
-                Padding = new Padding(14, 10, 14, 10)
+                Padding = new Padding(Theme.S(14), Theme.S(10), Theme.S(14), Theme.S(10))
             };
 
-            var btnBack = Theme.CreateButton("← Kembali", false, Theme.TEXT, 36, 100);
-            btnBack.Location = new Point(14, 11);
+            var btnBack = Theme.CreateButton("← Kembali", false, Theme.TEXT, Theme.S(36), Theme.S(102));
+            btnBack.Location = new Point(Theme.S(14), Theme.S(11));
             btnBack.Click += (s, e) => Close();
             topBar.Controls.Add(btnBack);
 
@@ -206,17 +207,24 @@ namespace DepupOfficeDesktop.Forms
                 ForeColor = Theme.TEXT,
                 BackColor = Theme.BG,
                 BorderStyle = BorderStyle.FixedSingle,
-                Location = new Point(126, 13),
-                Width = 260
+                Location = new Point(Theme.S(130), Theme.S(12)),
+                Width = Theme.S(340),
+                AccessibleName = "Nama lembar kerja"
             };
+            _sheetTitleEt.TextChanged += (s, e) => _dirty = true;
             topBar.Controls.Add(_sheetTitleEt);
+            topBar.Resize += (s, e) => _sheetTitleEt.Width =
+                Math.Max(1, Math.Min(Theme.S(420), topBar.ClientSize.Width - _sheetTitleEt.Left - Theme.S(14)));
 
             var rightActions = new FlowLayoutPanel
             {
-                Dock = DockStyle.Right,
+                Dock = DockStyle.Top,
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false
+                WrapContents = true,
+                BackColor = Theme.SURFACE,
+                Padding = new Padding(Theme.S(12), 0, Theme.S(12), Theme.S(6))
             };
 
             var btnTemplates = Theme.CreateButton("📊 Templat", false, Theme.TEAL, 36);
@@ -239,11 +247,10 @@ namespace DepupOfficeDesktop.Forms
                 PrintHelper.PrintSpreadsheet(this, t, GetExportRows());
             };
 
-            var btnExport = Theme.CreateButton("💾 Ekspor (.xlsx / .csv / .pdf)", true, Theme.TEAL, 36);
+            var btnExport = Theme.CreateButton("Ekspor lembar kerja", true, Theme.TEAL, Theme.S(36));
             btnExport.Click += (s, e) => SaveSpreadsheet();
 
             rightActions.Controls.AddRange(new Control[] { btnTemplates, btnSettings, btnVoice, btnPrint, btnExport });
-            topBar.Controls.Add(rightActions);
 
             // Formula Bar
             var formulaBar = new Panel
@@ -292,7 +299,8 @@ namespace DepupOfficeDesktop.Forms
                 if (_updatingUi) return;
                 EnsureCell(_activeRow, _activeCol);
                 _matrix[_activeRow][_activeCol].ValStr = _formulaEt.Text;
-                UpdateGridValuesOnly();
+                _dirty = true;
+                _grid.Invalidate();
             };
             formulaBar.Controls.Add(_formulaEt);
 
@@ -300,7 +308,9 @@ namespace DepupOfficeDesktop.Forms
             var gridToolBar = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 44,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                WrapContents = true,
                 BackColor = Theme.SURFACE,
                 Padding = new Padding(14, 5, 14, 5),
                 FlowDirection = FlowDirection.LeftToRight
@@ -309,9 +319,21 @@ namespace DepupOfficeDesktop.Forms
             Button ToolBtn(string label, Action onClick)
             {
                 var b = Theme.CreateButton(label, false, Theme.TEXT, 32);
-                b.Click += (s, e) => onClick();
+                b.Click += (s, e) => { _dirty = true; onClick(); };
                 return b;
             }
+
+            var autoSum = ToolBtn("Jumlah Otomatis", () =>
+            {
+                string colName = XlsxWriter.ColumnName(_activeCol);
+                int endRow = _activeRow;
+                if (endRow < 2) { Theme.Toast(this, "Pilih sel di bawah baris angka untuk menjumlahkan."); return; }
+                EnsureCell(_activeRow, _activeCol);
+                _matrix[_activeRow][_activeCol].ValStr = $"=SUM({colName}2:{colName}{endRow})";
+                _matrix[_activeRow][_activeCol].IsBold = true;
+                RenderGrid();
+            });
+            autoSum.Visible = AppStorage.Config.SheetAutoSum;
 
             gridToolBar.Controls.AddRange(new Control[]
             {
@@ -332,7 +354,7 @@ namespace DepupOfficeDesktop.Forms
                 }),
                 ToolBtn("+ Kolom", () =>
                 {
-                    if (_numCols < _colNames.Length)
+                    if (_numCols < MaxColumns)
                     {
                         _numCols++;
                         for (int r = 0; r < _matrix.Count; r++)
@@ -351,20 +373,7 @@ namespace DepupOfficeDesktop.Forms
                         RenderGrid();
                     }
                 }),
-                ToolBtn("=SUM Otomatis", () =>
-                {
-                    string colName = _colNames[_activeCol];
-                    int endRow = _activeRow;
-                    if (endRow >= 2)
-                    {
-                        EnsureCell(_activeRow, _activeCol);
-                        _matrix[_activeRow][_activeCol].ValStr = $"=SUM({colName}2:{colName}{endRow})";
-                        _matrix[_activeRow][_activeCol].IsBold = true;
-                        SyncFormulaBar();
-                        RenderGrid();
-                    }
-                    else Theme.Toast(this, "Pilih sel di bawah baris angka untuk menjumlahkan");
-                }),
+                autoSum,
                 ToolBtn("Bold Sel", () =>
                 {
                     EnsureCell(_activeRow, _activeCol);
@@ -400,34 +409,55 @@ namespace DepupOfficeDesktop.Forms
                 BorderStyle = BorderStyle.FixedSingle,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
+                AllowUserToOrderColumns = false,
+                VirtualMode = true,
                 RowHeadersWidth = 54,
                 ColumnHeadersHeight = 36,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
                 SelectionMode = DataGridViewSelectionMode.CellSelect,
                 MultiSelect = false,
                 Font = Theme.FontBody(10f)
             };
+            _grid.RowTemplate.Height = Theme.S(32);
+            _grid.RowPostPaint += (s, e) => TextRenderer.DrawText(e.Graphics, (e.RowIndex + 1).ToString(),
+                _grid.RowHeadersDefaultCellStyle.Font ?? _grid.Font,
+                new Rectangle(e.RowBounds.X, e.RowBounds.Y, _grid.RowHeadersWidth - Theme.S(10), e.RowBounds.Height),
+                _grid.RowHeadersDefaultCellStyle.ForeColor,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            _grid.CellValueNeeded += (s, e) =>
+            {
+                if (e.RowIndex >= 0 && e.ColumnIndex >= 0) e.Value = DisplayValue(e.RowIndex, e.ColumnIndex);
+            };
+            _grid.CellFormatting += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.RowIndex >= _matrix.Count || e.ColumnIndex < 0 || e.ColumnIndex >= _matrix[e.RowIndex].Count) return;
+                var cell = _matrix[e.RowIndex][e.ColumnIndex];
+                e.CellStyle!.BackColor = cell.BgColor;
+                e.CellStyle.ForeColor = Theme.PAPER_INK;
+                e.CellStyle.Font = Theme.FontBody(10f, cell.IsBold ? FontStyle.Bold : FontStyle.Regular);
+            };
             _grid.CellEnter += (s, e) =>
             {
-                if (_updatingUi) return;
+                if (_updatingUi || e.RowIndex < 0 || e.ColumnIndex < 0) return;
                 _activeRow = e.RowIndex;
                 _activeCol = e.ColumnIndex;
                 SyncFormulaBar();
             };
-            _grid.CellEndEdit += (s, e) =>
+            _grid.CellValuePushed += (s, e) =>
             {
                 if (_updatingUi) return;
                 EnsureCell(e.RowIndex, e.ColumnIndex);
-                string val = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value?.ToString() ?? "";
-                _matrix[e.RowIndex][e.ColumnIndex].ValStr = val;
-                SyncFormulaBar();
-                UpdateGridValuesOnly();
+                _matrix[e.RowIndex][e.ColumnIndex].ValStr = e.Value?.ToString() ?? "";
+                _dirty = true;
             };
-            _grid.CellBeginEdit += (s, e) =>
+            _grid.CellEndEdit += (s, e) => { SyncFormulaBar(); _grid.Invalidate(); };
+            _grid.EditingControlShowing += (s, e) =>
             {
-                // Tampilkan rumus mentah saat sel diedit langsung
-                EnsureCell(e.RowIndex, e.ColumnIndex);
-                _grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value = _matrix[e.RowIndex][e.ColumnIndex].ValStr;
+                if (e.Control is TextBox editor && _grid.CurrentCell is { } cell)
+                {
+                    editor.Text = _matrix[cell.RowIndex][cell.ColumnIndex].ValStr;
+                    editor.SelectAll();
+                }
             };
 
             gridContainer.Controls.Add(_grid);
@@ -435,6 +465,7 @@ namespace DepupOfficeDesktop.Forms
             Controls.Add(gridContainer);
             Controls.Add(gridToolBar);
             Controls.Add(formulaBar);
+            Controls.Add(rightActions);
             Controls.Add(topBar);
         }
 
@@ -451,7 +482,7 @@ namespace DepupOfficeDesktop.Forms
             EnsureCell(_activeRow, _activeCol);
             _updatingUi = true;
             _formulaEt.Text = _matrix[_activeRow][_activeCol].ValStr;
-            _activeCellPill.Text = $"{_colNames[Math.Clamp(_activeCol, 0, _colNames.Length - 1)]}{_activeRow + 1}";
+            _activeCellPill.Text = $"{XlsxWriter.ColumnName(_activeCol)}{_activeRow + 1}";
             _updatingUi = false;
         }
 
@@ -460,51 +491,27 @@ namespace DepupOfficeDesktop.Forms
             _updatingUi = true;
             _grid.SuspendLayout();
             _grid.CellBorderStyle = _currentGridlines ? DataGridViewCellBorderStyle.Single : DataGridViewCellBorderStyle.None;
-            _grid.Columns.Clear();
-
-            for (int c = 0; c < _numCols; c++)
+            while (_grid.Columns.Count > _numCols)
+                _grid.Columns.RemoveAt(_grid.Columns.Count - 1);
+            for (int c = _grid.Columns.Count; c < _numCols; c++)
             {
                 var col = new DataGridViewTextBoxColumn
                 {
-                    HeaderText = _colNames[c],
+                    HeaderText = XlsxWriter.ColumnName(c),
+                    Width = Theme.S(136),
+                    MinimumWidth = Theme.S(68),
                     SortMode = DataGridViewColumnSortMode.NotSortable
                 };
                 _grid.Columns.Add(col);
             }
-
-            _grid.Rows.Clear();
-            for (int r = 0; r < _matrix.Count; r++)
-            {
-                int rowIdx = _grid.Rows.Add();
-                _grid.Rows[rowIdx].HeaderCell.Value = (r + 1).ToString();
-                _grid.Rows[rowIdx].Height = 32;
-            }
-
-            UpdateGridValuesOnly();
+            _grid.AutoSizeColumnsMode = _numCols <= 6 ? DataGridViewAutoSizeColumnsMode.Fill : DataGridViewAutoSizeColumnsMode.None;
+            _grid.RowCount = _matrix.Count;
             if (_activeRow < _grid.Rows.Count && _activeCol < _grid.Columns.Count)
                 _grid.CurrentCell = _grid.Rows[_activeRow].Cells[_activeCol];
-
-            _grid.ResumeLayout();
+            _grid.ResumeLayout(true);
             _updatingUi = false;
-        }
-
-        private void UpdateGridValuesOnly()
-        {
-            bool prev = _updatingUi;
-            _updatingUi = true;
-            for (int r = 0; r < _matrix.Count && r < _grid.Rows.Count; r++)
-            {
-                for (int c = 0; c < _numCols && c < _grid.Columns.Count; c++)
-                {
-                    EnsureCell(r, c);
-                    var cell = _matrix[r][c];
-                    var dgvCell = _grid.Rows[r].Cells[c];
-                    dgvCell.Value = DisplayValue(r, c);
-                    dgvCell.Style.BackColor = cell.BgColor;
-                    dgvCell.Style.Font = Theme.FontBody(10f, cell.IsBold ? FontStyle.Bold : FontStyle.Regular);
-                }
-            }
-            _updatingUi = prev;
+            SyncFormulaBar();
+            _grid.Invalidate();
         }
 
         // ================= EVALUATOR RUMUS (PORTING FormulaParser SheetEditorActivity.kt) =================
@@ -517,7 +524,8 @@ namespace DepupOfficeDesktop.Forms
             if (!raw.StartsWith("=")) return ParseNumber(raw);
 
             string key = $"{r}:{c}";
-            if (!_visitingCells.Add(key)) return 0.0;
+            if (_visitingCells.Count >= 256 || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack() ||
+                !_visitingCells.Add(key)) return null;
             try
             {
                 var parser = new FormulaParser(this, raw.Substring(1));
@@ -534,10 +542,20 @@ namespace DepupOfficeDesktop.Forms
             }
         }
 
+        private double? ReferencedValue(int row, int column)
+        {
+            double? value = CellNumber(row, column);
+            if (!value.HasValue && row >= 0 && row < _matrix.Count && column >= 0 && column < _matrix[row].Count &&
+                _matrix[row][column].ValStr.TrimStart().StartsWith("="))
+                throw new ArgumentException("Referensi mengandung rumus yang tidak valid.");
+            return value;
+        }
+
         private double? ParseNumber(string raw)
         {
-            string s = raw.Trim()
-                .Replace(_currentCurrency, "", StringComparison.OrdinalIgnoreCase)
+            string s = string.IsNullOrWhiteSpace(_currentCurrency) ? raw.Trim() :
+                raw.Trim().Replace(_currentCurrency, "", StringComparison.OrdinalIgnoreCase);
+            s = s
                 .Replace("Rp", "", StringComparison.OrdinalIgnoreCase)
                 .Replace("$", "")
                 .Replace("€", "")
@@ -574,7 +592,7 @@ namespace DepupOfficeDesktop.Forms
             string raw = _matrix[r][c].ValStr;
             if (!raw.TrimStart().StartsWith("=")) return raw;
             double? val = CellNumber(r, c);
-            return val.HasValue ? val.Value.ToString("N0", _idCulture) : "#ERROR!";
+            return val.HasValue ? val.Value.ToString("#,0.##########", _idCulture) : "#ERROR!";
         }
 
         private sealed class FormulaParser
@@ -582,6 +600,7 @@ namespace DepupOfficeDesktop.Forms
             private readonly SheetEditorForm _owner;
             private readonly string _src;
             private int _pos = 0;
+            private int _depth;
 
             public FormulaParser(SheetEditorForm owner, string src)
             {
@@ -634,25 +653,33 @@ namespace DepupOfficeDesktop.Forms
 
             private object Power()
             {
-                object val = Unary();
-                SkipSpace();
-                if (_pos < _src.Length && _src[_pos] == '^')
+                if (_depth >= 64) throw new ArgumentException("Rumus bertingkat terlalu dalam.");
+                _depth++;
+                try
                 {
-                    _pos++;
-                    val = Math.Pow(Scalar(val), Scalar(Power()));
+                    object val = Unary();
+                    SkipSpace();
+                    if (_pos < _src.Length && _src[_pos] == '^')
+                    {
+                        _pos++;
+                        val = Math.Pow(Scalar(val), Scalar(Power()));
+                    }
+                    return val;
                 }
-                return val;
+                finally { _depth--; }
             }
 
             private object Unary()
             {
+                bool negative = false;
                 SkipSpace();
-                if (_pos < _src.Length)
+                while (_pos < _src.Length && _src[_pos] is '-' or '+')
                 {
-                    if (_src[_pos] == '-') { _pos++; return -Scalar(Unary()); }
-                    if (_src[_pos] == '+') { _pos++; return Unary(); }
+                    if (_src[_pos++] == '-') negative = !negative;
+                    SkipSpace();
                 }
-                return Primary();
+                object value = Primary();
+                return negative ? -Scalar(value) : value;
             }
 
             private object Primary()
@@ -665,11 +692,17 @@ namespace DepupOfficeDesktop.Forms
                     _pos++;
                     object v = Expr();
                     SkipSpace();
-                    if (_pos < _src.Length && _src[_pos] == ')') _pos++;
+                    if (_pos >= _src.Length || _src[_pos] != ')') throw new ArgumentException("Kurung penutup diperlukan.");
+                    _pos++;
                     return v;
                 }
                 if (char.IsDigit(ch) || ch == '.') return ReadNumber();
-                if (ch == '$') { _pos++; return Primary(); }
+                if (ch == '$')
+                {
+                    _pos++;
+                    if (_pos >= _src.Length || !char.IsAsciiLetter(_src[_pos])) throw new ArgumentException("Referensi sel tidak valid.");
+                    return ReadNameOrCell();
+                }
                 if (char.IsLetter(ch)) return ReadNameOrCell();
                 throw new ArgumentException($"Karakter tak dikenal: {ch}");
             }
@@ -687,25 +720,28 @@ namespace DepupOfficeDesktop.Forms
                 while (_pos < _src.Length && char.IsLetter(_src[_pos])) _pos++;
                 string name = _src.Substring(start, _pos - start).ToUpperInvariant();
 
+                if (_pos < _src.Length && _src[_pos] == '$') _pos++;
                 int digitsStart = _pos;
                 while (_pos < _src.Length && char.IsDigit(_src[_pos])) _pos++;
                 if (_pos > digitsStart)
                 {
-                    int rowIdx = (int.TryParse(_src.Substring(digitsStart, _pos - digitsStart), out int r) ? r : 1) - 1;
+                    if (!int.TryParse(_src.AsSpan(digitsStart, _pos - digitsStart), out int r) || r is < 1 or > 1_048_576)
+                        throw new ArgumentException("Baris sel tidak valid.");
+                    int rowIdx = r - 1;
                     int colIdx = ColumnIndex(name);
                     SkipSpace();
                     if (_pos < _src.Length && _src[_pos] == ':')
                     {
                         _pos++;
                         var end = ReadCellReference();
-                        if (end == null) return 0.0;
+                        if (end == null) throw new ArgumentException("Akhir rentang tidak valid.");
                         return RangeValues(rowIdx, colIdx, end.Value.Row, end.Value.Col);
                     }
-                    return _owner.CellNumber(rowIdx, colIdx) ?? 0.0;
+                    return _owner.ReferencedValue(rowIdx, colIdx) ?? 0.0;
                 }
 
                 SkipSpace();
-                if (_pos >= _src.Length || _src[_pos] != '(') return 0.0;
+                if (_pos >= _src.Length || _src[_pos] != '(') throw new ArgumentException("Nama sel tidak valid.");
                 _pos++;
                 var args = new List<object>();
                 SkipSpace();
@@ -730,13 +766,17 @@ namespace DepupOfficeDesktop.Forms
             private (int Row, int Col)? ReadCellReference()
             {
                 SkipSpace();
+                if (_pos < _src.Length && _src[_pos] == '$') _pos++;
                 int start = _pos;
                 while (_pos < _src.Length && char.IsLetter(_src[_pos])) _pos++;
                 string letters = _src.Substring(start, _pos - start);
+                if (_pos < _src.Length && _src[_pos] == '$') _pos++;
                 int digitsStart = _pos;
                 while (_pos < _src.Length && char.IsDigit(_src[_pos])) _pos++;
                 if (string.IsNullOrEmpty(letters) || _pos == digitsStart) return null;
-                int row = (int.TryParse(_src.Substring(digitsStart, _pos - digitsStart), out int r) ? r : 1) - 1;
+                if (!int.TryParse(_src.AsSpan(digitsStart, _pos - digitsStart), out int r) || r is < 1 or > 1_048_576)
+                    return null;
+                int row = r - 1;
                 return (row, ColumnIndex(letters));
             }
 
@@ -744,20 +784,24 @@ namespace DepupOfficeDesktop.Forms
             {
                 int n = 0;
                 foreach (char ch in letters)
+                {
+                    if (!char.IsAsciiLetter(ch)) throw new ArgumentException("Kolom sel tidak valid.");
                     n = n * 26 + (char.ToUpperInvariant(ch) - 'A' + 1);
-                return Math.Max(0, n - 1);
+                    if (n > MaxColumns) throw new ArgumentException("Kolom sel di luar rentang Excel.");
+                }
+                return n - 1;
             }
 
             private List<double> RangeValues(int r1, int c1, int r2, int c2)
             {
-                int top = Math.Min(r1, r2), bottom = Math.Max(r1, r2);
-                int left = Math.Min(c1, c2), right = Math.Max(c1, c2);
+                int top = Math.Min(r1, r2), bottom = Math.Min(_owner._matrix.Count - 1, Math.Max(r1, r2));
+                int left = Math.Min(c1, c2), right = Math.Min(_owner._numCols - 1, Math.Max(c1, c2));
                 var list = new List<double>();
                 for (int r = top; r <= bottom; r++)
                 {
                     for (int c = left; c <= right; c++)
                     {
-                        double? v = _owner.CellNumber(r, c);
+                        double? v = _owner.ReferencedValue(r, c);
                         if (v.HasValue) list.Add(v.Value);
                     }
                 }
@@ -780,9 +824,9 @@ namespace DepupOfficeDesktop.Forms
                     "MAX" => values.Count == 0 ? 0.0 : values.Max(),
                     "COUNT" => values.Count,
                     "ABS" => Math.Abs(values.FirstOrDefault()),
-                    "ROUND" => Math.Round(values.ElementAtOrDefault(0), (int)values.ElementAtOrDefault(1)),
+                    "ROUND" => Math.Round(values.ElementAtOrDefault(0), (int)values.ElementAtOrDefault(1), MidpointRounding.AwayFromZero),
                     "INT" => Math.Floor(values.FirstOrDefault()),
-                    _ => 0.0
+                    _ => throw new NotSupportedException($"Fungsi {name} belum didukung.")
                 };
             }
 
@@ -802,16 +846,26 @@ namespace DepupOfficeDesktop.Forms
         private void ShowTemplateMenu(Control anchor)
         {
             var menu = new ContextMenuStrip();
-            menu.Items.Add("Laporan Keuangan & Sales", null, (s, e) => { SeedDefaultMatrix(); RenderGrid(); });
-            menu.Items.Add("Invoice / Tagihan", null, (s, e) => { LoadInvoiceTemplate(); RenderGrid(); });
-            menu.Items.Add("Presensi & Daftar Hadir", null, (s, e) => { LoadPresensiTemplate(); RenderGrid(); });
-            menu.Items.Add("Kosongkan Tabel", null, (s, e) =>
+            void ReplaceTemplate(Action initialize)
+            {
+                _grid.EndEdit();
+                if (_dirty && MessageBox.Show(this, "Ganti lembar kerja dan buang perubahan yang belum disimpan?",
+                    "Templat Spreadsheet", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                initialize();
+                _activeRow = _activeCol = 0;
+                _dirty = true;
+                RenderGrid();
+            }
+            menu.Items.Add("Laporan Keuangan & Sales", null, (s, e) => ReplaceTemplate(SeedDefaultMatrix));
+            menu.Items.Add("Invoice / Tagihan", null, (s, e) => ReplaceTemplate(LoadInvoiceTemplate));
+            menu.Items.Add("Presensi & Daftar Hadir", null, (s, e) => ReplaceTemplate(LoadPresensiTemplate));
+            menu.Items.Add("Kosongkan Tabel", null, (s, e) => ReplaceTemplate(() =>
             {
                 _matrix.Clear();
                 _numCols = 4;
                 for (int r = 0; r < 8; r++) _matrix.Add(Enumerable.Range(0, _numCols).Select(_ => new SheetCell("")).ToList());
-                RenderGrid();
-            });
+            }));
+            menu.Closed += (s, e) => menu.Dispose();
             menu.Show(anchor, new Point(0, anchor.Height));
         }
 
@@ -883,7 +937,7 @@ namespace DepupOfficeDesktop.Forms
                 {
                     string val = DisplayValue(r, c);
                     if (!string.IsNullOrWhiteSpace(val))
-                        parts.Add($"Kolom {_colNames[c]}: {val}");
+                        parts.Add($"Kolom {XlsxWriter.ColumnName(c)}: {val}");
                 }
                 if (parts.Count > 0)
                     sb.Append($"Baris {r + 1}: ").Append(string.Join(", ", parts)).Append('\n');
@@ -891,10 +945,27 @@ namespace DepupOfficeDesktop.Forms
             return sb.ToString().Trim();
         }
 
+        private Dictionary<(int Row, int Column), (string Expression, double Value)> GetExportFormulas()
+        {
+            var formulas = new Dictionary<(int, int), (string, double)>();
+            for (int row = 0; row < _matrix.Count; row++)
+            {
+                for (int column = 0; column < _numCols; column++)
+                {
+                    string raw = _matrix[row][column].ValStr.Trim();
+                    if (!raw.StartsWith("=") || CellNumber(row, column) is not double value) continue;
+                    string expression = Regex.Replace(raw[1..].Replace(';', ','), @"\bAVG(?=\s*\()", "AVERAGE", RegexOptions.IgnoreCase);
+                    formulas.Add((row, column), (expression, value));
+                }
+            }
+            return formulas;
+        }
+
         private void SaveSpreadsheet()
         {
+            if (!_grid.EndEdit()) return;
             string title = string.IsNullOrWhiteSpace(_sheetTitleEt.Text) ? "Spreadsheet_Excel" : _sheetTitleEt.Text.Trim();
-            string defaultName = _sourceName ?? AppStorage.BaseName(title);
+            string defaultName = _sourceName == null ? AppStorage.BaseName(title) : _sourceName + "_edit";
 
             using var sfd = new SaveFileDialog
             {
@@ -907,29 +978,43 @@ namespace DepupOfficeDesktop.Forms
 
             string outPath = sfd.FileName;
             string pdfPath = Path.ChangeExtension(outPath, ".pdf");
+            if (File.Exists(pdfPath))
+                pdfPath = Path.Combine(Path.GetDirectoryName(outPath)!,
+                    $"{Path.GetFileNameWithoutExtension(outPath)}_{DateTime.Now:yyyyMMdd_HHmmss_fff}.pdf");
 
             try
             {
                 var exportRows = GetExportRows();
                 var boldRows = _matrix.Select((r, idx) => (r, idx)).Where(x => x.r.Any(c => c.IsBold)).Select(x => x.idx).ToHashSet();
 
-                if (outPath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                bool csv = outPath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
+                string separator = AppStorage.Config.SheetCsvSeparator is ";" or "\t" ? AppStorage.Config.SheetCsvSeparator : ",";
+                var formulas = csv ? null : GetExportFormulas();
+                int columns = _numCols;
+                if (!Ui.Busy(this, "Menyimpan lembar kerja…", _ =>
                 {
-                    var csvLines = exportRows.Select(r => string.Join(",", r.Select(c => $"\"{c.Replace("\"", "\"\"")}\"")));
-                    File.WriteAllLines(outPath, csvLines, Encoding.UTF8);
-                }
-                else
-                {
-                    XlsxWriter.Write(outPath, title, exportRows, boldRows, _numCols);
-                }
+                    string temp = outPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    try
+                    {
+                        if (csv)
+                        {
+                            var csvLines = exportRows.Select(row => string.Join(separator, row.Select(cell => $"\"{cell.Replace("\"", "\"\"")}\"")));
+                            File.WriteAllLines(temp, csvLines, Encoding.UTF8);
+                        }
+                        else XlsxWriter.Write(temp, title, exportRows, boldRows, columns, formulas);
+                        File.Move(temp, outPath, overwrite: true);
+                    }
+                    finally { if (File.Exists(temp)) File.Delete(temp); }
+                })) return;
+
+                _dirty = false;
+                AppStorage.AddRecent(outPath);
+                AppStorage.SetLastJob("Spreadsheet Diekspor", outPath);
 
                 string pdfText = $"LAPORAN SPREADSHEET EXCEL\nJudul: {title}\n\n" +
                                  string.Join("\n", exportRows.Select(r => string.Join("  |  ", r)));
-                PdfEngine.TextToPdf(pdfText, pdfPath);
-
-                AppStorage.AddRecent(outPath);
+                if (!Ui.Busy(this, "Membuat salinan PDF…", _ => PdfEngine.TextToPdf(pdfText, pdfPath))) return;
                 AppStorage.AddRecent(pdfPath);
-                AppStorage.SetLastJob("Spreadsheet Diekspor", outPath);
 
                 MessageBox.Show(
                     this,
@@ -942,6 +1027,16 @@ namespace DepupOfficeDesktop.Forms
             {
                 MessageBox.Show(this, $"Gagal mengekspor spreadsheet: {ex.Message}", "Gagal", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            _grid.EndEdit();
+            if (_dirty && e.CloseReason == CloseReason.UserClosing &&
+                MessageBox.Show(this, "Tutup spreadsheet tanpa menyimpan perubahan?", "Editor Spreadsheet",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                e.Cancel = true;
+            base.OnFormClosing(e);
         }
     }
 }
