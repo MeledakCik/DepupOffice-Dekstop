@@ -9,7 +9,7 @@ internal sealed class WorkspaceViewport : Panel, IMessageFilter
     private const int WmMouseWheel = 0x020A;
     private const int WheelDelta = 120;
 
-    private readonly Panel _clip = new() { TabStop = false };
+    private readonly WorkspaceSurface _clip = new();
     private readonly VScrollBar _bar = new() { AccessibleName = "Gulir halaman", TabStop = false, Visible = false };
     private WorkspacePage? _page;
     private int _offset, _limit, _wheelRemainder;
@@ -45,25 +45,31 @@ internal sealed class WorkspaceViewport : Panel, IMessageFilter
         }
     }
 
-    public WorkspacePage? SetPage(WorkspacePage page)
+    public WorkspacePage? SetPage(WorkspacePage page, int scrollOffset = 0)
     {
         var previous = _page;
         _clip.SuspendLayout();
         try
         {
             if (previous != null)
-            {
                 previous.SizeChanged -= PageSizeChanged;
-                _clip.Controls.Remove(previous);
-            }
+
+            // Keep the current page visible until the replacement has its final position.
+            if (page.AutoSize) page.Size = page.PreferredSize;
+            page.Visible = false;
             _page = page;
-            _offset = _wheelRemainder = 0;
-            page.Location = new Point(Padding.Left, Padding.Top);
+            _offset = scrollOffset;
+            _wheelRemainder = 0;
             _clip.Controls.Add(page);
-            page.SizeChanged += PageSizeChanged;
+            UpdateScrollRange();
+            page.BringToFront();
+            page.Visible = true;
+            if (previous != null) _clip.Controls.Remove(previous);
         }
         finally { _clip.ResumeLayout(true); }
-        UpdateScrollRange();
+        page.SizeChanged += PageSizeChanged;
+        UpdateScrollRange(present: false);
+        Redraw.PresentContent(_clip);
         return previous;
     }
 
@@ -78,7 +84,7 @@ internal sealed class WorkspaceViewport : Panel, IMessageFilter
         UpdateScrollRange();
     }
 
-    private void UpdateScrollRange()
+    private void UpdateScrollRange(bool present = true)
     {
         if (_updatingRange || Disposing || IsDisposed) return;
         int documentHeight = (_page?.Height ?? 0) + Padding.Vertical;
@@ -96,17 +102,16 @@ internal sealed class WorkspaceViewport : Panel, IMessageFilter
             _bar.Visible = _limit > 0;
         }
         finally { _updatingRange = false; }
-        PositionPage();
+        PositionPage(present);
     }
 
-    private void PositionPage()
+    private void PositionPage(bool present = true)
     {
         if (_page == null) return;
         var origin = new Point(Padding.Left, Padding.Top - _offset);
         if (_page.Location == origin) return;
         _page.MoveTo(origin);
-        // Leave painting to the message queue so multiple wheel events share any pending redraw.
-        _clip.Invalidate(true);
+        if (present && _page.Visible) Redraw.PresentContent(_clip);
     }
 
     public bool ScrollByKey(Keys key)
@@ -159,11 +164,33 @@ internal sealed class WorkspaceViewport : Panel, IMessageFilter
         Application.RemoveMessageFilter(this);
         base.OnHandleDestroyed(e);
     }
+
+    private sealed class WorkspaceSurface : Panel
+    {
+        private const int WsExComposited = 0x02000000;
+
+        public WorkspaceSurface()
+        {
+            TabStop = false;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                // Buffer the cards, labels and other child HWNDs together on the visible surface.
+                var parameters = base.CreateParams;
+                parameters.ExStyle |= WsExComposited;
+                return parameters;
+            }
+        }
+    }
 }
 
 internal sealed class WorkspacePage : FlowLayoutPanel
 {
-    private const uint NoSize = 0x0001, NoZOrder = 0x0004, NoActivate = 0x0010, NoCopyBits = 0x0100;
+    private const uint NoSize = 0x0001, NoZOrder = 0x0004, NoRedraw = 0x0008, NoActivate = 0x0010;
 
     public WorkspacePage()
     {
@@ -176,8 +203,8 @@ internal sealed class WorkspacePage : FlowLayoutPanel
 
     internal void MoveTo(Point origin)
     {
-        // The top and bottom of this window can be clipped. Discard its previous pixels when moving it.
-        const uint moveFlags = NoSize | NoZOrder | NoActivate | NoCopyBits;
+        // Move the clipped window without showing an intermediate erase or pixel copy.
+        const uint moveFlags = NoSize | NoZOrder | NoRedraw | NoActivate;
         if (!IsHandleCreated || !SetWindowPos(Handle, IntPtr.Zero, origin.X, origin.Y, 0, 0, moveFlags))
             Location = origin;
     }

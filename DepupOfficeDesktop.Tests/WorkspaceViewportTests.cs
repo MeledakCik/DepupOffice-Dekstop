@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using DepupOfficeDesktop.Controls;
 using Xunit;
@@ -96,6 +97,41 @@ public sealed class WorkspaceViewportTests
             Assert.True(viewport.ScrollByKey(Keys.End));
             Assert.Equal(432, viewport.ScrollOffset);
         });
+
+    [Fact]
+    public Task NativeSurfaceBuffersChildrenAndShowsTheReplacementAtItsRestoredOffset() =>
+        RunOnSta(() =>
+        {
+            using var viewport = new WorkspaceViewport { Size = new Size(360, 240), Padding = new Padding(12) };
+            using var oldPage = new WorkspacePage();
+            oldPage.Controls.Add(new Panel { Size = new Size(300, 600) });
+            viewport.SetPage(oldPage);
+            viewport.CreateControl();
+
+            const int extendedStyleIndex = -20, composited = 0x02000000;
+            var surface = oldPage.Parent!;
+            Assert.True((GetWindowLong(surface.Handle, extendedStyleIndex) & composited) != 0);
+
+            using var nextPage = new WorkspacePage();
+            nextPage.Controls.Add(new Panel { Size = new Size(300, 900) });
+            var firstVisiblePosition = Point.Empty;
+            bool oldPageWasVisible = false;
+            nextPage.VisibleChanged += (_, _) =>
+            {
+                if (!nextPage.Visible) return;
+                firstVisiblePosition = nextPage.Location;
+                oldPageWasVisible = oldPage.Visible && oldPage.Parent == surface;
+            };
+
+            Assert.Same(oldPage, viewport.SetPage(nextPage, 180));
+            Assert.True(oldPageWasVisible);
+            Assert.Equal(new Point(12, -168), firstVisiblePosition);
+            Assert.Equal(180, viewport.ScrollOffset);
+            Assert.Null(oldPage.Parent);
+        });
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    private static extern int GetWindowLong(IntPtr window, int index);
 
     [Fact]
     public Task WheelRoutesFromFocusedChromeOnlyWhenPointerIsOverWorkspace() =>

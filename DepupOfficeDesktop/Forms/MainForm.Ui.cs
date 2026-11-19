@@ -82,8 +82,8 @@ namespace DepupOfficeDesktop.Forms
                     BeginInvoke(new Action(() =>
                     {
                         if (IsDisposed || Disposing) return;
-                        Theme.ApplyWindowChrome(this);
                         RebuildShellForDpi();
+                        Theme.ApplyWindowChrome(this);
                     }));
                 };
                 Theme.Changed += _themeChanged;
@@ -293,18 +293,16 @@ namespace DepupOfficeDesktop.Forms
             {
                 if (viewerHost != null) _rightHost.Controls.Remove(viewerHost);
                 var old = Controls.Cast<Control>().ToArray();
-                Controls.Clear();
-                foreach (var control in old) control.Dispose();
                 _navItems.Clear();
                 BuildShell();
+                foreach (var control in old) control.Dispose();
                 if (viewerHost != null)
                 {
                     _rightHost.Controls.Add(viewerHost);
                     viewerHost.BringToFront();
                 }
                 ResumeLayout(true);
-                RenderCurrentTab();
-                _contentHost.ScrollOffset = scroll;
+                RenderCurrentTab(scroll);
                 _contentHost.Visible = viewerHost == null;
                 if (viewerHost != null) _activeViewer?.Focus();
                 else if (searchFocused)
@@ -332,8 +330,7 @@ namespace DepupOfficeDesktop.Forms
             _toolbarTitle.Text = _tabNames[idx];
             foreach (var (k, item) in _navItems)
                 item.SetActive(k == _currentTab, animate: changed);
-            RenderCurrentTab();
-            _contentHost.ScrollOffset = _tabScroll.GetValueOrDefault(_currentTab);
+            RenderCurrentTab(_tabScroll.GetValueOrDefault(_currentTab));
         }
 
         private int AvailableWidth() => _contentHost.ContentWidth;
@@ -343,16 +340,17 @@ namespace DepupOfficeDesktop.Forms
             return Math.Max(1, Math.Min(S(1180), AvailableWidth() - S(4)));
         }
 
-        private void RenderCurrentTab(bool preserveScroll = false)
+        private void RenderCurrentTab(bool preserveScroll = false) =>
+            RenderCurrentTab(preserveScroll ? _contentHost.ScrollOffset : 0);
+
+        private void RenderCurrentTab(int scrollOffset)
         {
-            int scroll = preserveScroll ? _contentHost.ScrollOffset : 0;
-            RenderCurrentTabCore();
-            if (preserveScroll) _contentHost.ScrollOffset = scroll;
+            RenderCurrentTabCore(scrollOffset);
             if (!_reflowOnly && (_currentTab == TAB_HOME || (_currentTab == TAB_DOCS && _docsMode != 2)))
                 _ = RefreshHistoryAsync();
         }
 
-        private void RenderCurrentTabCore()
+        private void RenderCurrentTabCore(int scrollOffset)
         {
             _recentListPanel = null;
             _homeRecentPanel = null;
@@ -376,7 +374,7 @@ namespace DepupOfficeDesktop.Forms
 
             _builtAvailWidth = AvailableWidth();
             // Tunggu sampai event klik di halaman lama selesai sebelum membuang kontrolnya.
-            if (_contentHost.SetPage(page) is { } old) BeginInvoke(new Action(old.Dispose));
+            if (_contentHost.SetPage(page, scrollOffset) is { } old) BeginInvoke(new Action(old.Dispose));
         }
 
         // ================= KOMPONEN (padanan Ui.kt Android) =================
@@ -882,7 +880,7 @@ namespace DepupOfficeDesktop.Forms
             panel.SuspendLayout();
             try
             {
-                foreach (Control control in panel.Controls.Cast<Control>().ToArray()) control.Dispose();
+                var previous = panel.Controls.Cast<Control>().ToArray();
                 panel.Controls.Add(content);
                 if (showMore != null && count > _listLimit)
                 {
@@ -892,6 +890,7 @@ namespace DepupOfficeDesktop.Forms
                     more.Click += (s, e) => { _listLimit += InitialListLimit; showMore(); };
                     panel.Controls.Add(more);
                 }
+                foreach (var control in previous) control.Dispose();
             }
             finally
             {

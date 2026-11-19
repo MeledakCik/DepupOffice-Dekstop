@@ -34,7 +34,13 @@ internal sealed class GlassPane : Panel
 internal static class Redraw
 {
     private const int WmSetRedraw = 0x000B;
-    private const uint Invalidate = 0x0001, Erase = 0x0004, AllChildren = 0x0080, Frame = 0x0400;
+    private const uint Invalidate = 0x0001, NoErase = 0x0020, AllChildren = 0x0080, UpdateNow = 0x0100, Frame = 0x0400;
+
+    public static void PresentContent(Control control)
+    {
+        if (!control.IsHandleCreated || !control.Visible) return;
+        RedrawWindow(control.Handle, IntPtr.Zero, IntPtr.Zero, Invalidate | NoErase | AllChildren | UpdateNow);
+    }
 
     public static void Suspend(Control control)
     {
@@ -45,7 +51,7 @@ internal static class Redraw
     {
         if (!control.IsHandleCreated) return;
         SendMessage(control.Handle, WmSetRedraw, (IntPtr)1, IntPtr.Zero);
-        RedrawWindow(control.Handle, IntPtr.Zero, IntPtr.Zero, Invalidate | Erase | Frame | AllChildren);
+        RedrawWindow(control.Handle, IntPtr.Zero, IntPtr.Zero, Invalidate | NoErase | Frame | AllChildren);
     }
 
     [DllImport("user32.dll")]
