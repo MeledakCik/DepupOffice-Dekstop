@@ -934,27 +934,30 @@ namespace DepupOfficeDesktop.Controls
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
             if (rect.Width <= 0 || rect.Height <= 0) return;
-            using (var track = Theme.RoundedRect(rect, Theme.S(9)))
-            using (var b = new SolidBrush(Theme.SURFACE2))
-                g.FillPath(b, track);
+            // Android segmented: trek pil SURFACE bergaris LINE, ibu jari pil TINTA (INK) dengan teks ON_INK
+            using (var track = Theme.RoundedRect(rect, rect.Height / 2))
+            {
+                using (var b = new SolidBrush(Theme.SURFACE)) g.FillPath(b, track);
+                using (var lp = new Pen(Theme.LINE)) g.DrawPath(lp, track);
+            }
             for (int i = 0; i < _items.Length; i++)
             {
                 var r = Rectangle.Round(Slot(i));
                 if (i == _sel)
                 {
-                    using var thumb = Theme.RoundedRect(r, Theme.S(6));
-                    using var tb = new SolidBrush(Theme.Dark ? Theme.SURFACE3 : Theme.SURFACE);
+                    using var thumb = Theme.RoundedRect(r, r.Height / 2);
+                    using var tb = new SolidBrush(Theme.INK);
                     g.FillPath(tb, thumb);
                     if (Focused && ShowFocusCues)
                         using (var fp = new Pen(Theme.ACCENT, 2f)) g.DrawPath(fp, thumb);
                 }
                 else if (i == _hover)
                 {
-                    using var hp = Theme.RoundedRect(r, Theme.S(6));
-                    using var hb = new SolidBrush(Theme.SURFACE3);
+                    using var hp = Theme.RoundedRect(r, r.Height / 2);
+                    using var hb = new SolidBrush(Theme.SURFACE2);
                     g.FillPath(hb, hp);
                 }
-                TextRenderer.DrawText(g, _items[i], Font, r, i == _sel ? Theme.TEXT : Theme.MUTED,
+                TextRenderer.DrawText(g, _items[i], Font, r, i == _sel ? Theme.ON_INK : Theme.TEXT,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
             }
         }

@@ -413,14 +413,20 @@ namespace DepupOfficeDesktop.Forms
             panel.Controls.Add(titleLbl);
             if (onLinkClick != null)
             {
-                var link = new LinkLabel
+                // Android sectionTitle: tautan abu tebal + chevron, tanpa garis bawah
+                var link = new Label
                 {
-                    Text = badgeOrLink, Font = Theme.FontLabel(10f), LinkColor = Theme.ACCENT_LIGHT,
-                    ActiveLinkColor = Theme.ACCENT_LIGHT, AutoSize = true, UseMnemonic = false, BackColor = Color.Transparent
+                    Text = badgeOrLink, Font = Theme.FontLabel(10.5f, FontStyle.Bold), ForeColor = Theme.MUTED,
+                    AutoSize = true, UseMnemonic = false, BackColor = Color.Transparent, Cursor = Cursors.Hand,
+                    AccessibleRole = AccessibleRole.Link, AccessibleName = badgeOrLink + " " + title
                 };
+                var chev = new IconGlyph("chev", Theme.MUTED) { Size = new Size(S(14), S(14)), Cursor = Cursors.Hand };
                 link.Click += (s, e) => onLinkClick();
-                link.Location = new Point(width - link.GetPreferredSize(Size.Empty).Width, S(9));
+                chev.Click += (s, e) => onLinkClick();
+                chev.Location = new Point(width - S(14), S(11));
+                link.Location = new Point(chev.Left - S(2) - link.GetPreferredSize(Size.Empty).Width, S(8));
                 panel.Controls.Add(link);
+                panel.Controls.Add(chev);
             }
             else if (!string.IsNullOrEmpty(badgeOrLink))
             {
@@ -622,6 +628,7 @@ namespace DepupOfficeDesktop.Forms
 
             // Baru dibuka: korsel sampul
             var recentHdr = CreateSectionHeader("Baru dibuka", "Semua", w, () => { _docsMode = 0; SelectTab(TAB_DOCS); });
+            _homeRecentHeader = recentHdr;
             p.Controls.Add(recentHdr);
             _homeRecentPanel = new FlowLayoutPanel
             {
@@ -1274,12 +1281,15 @@ namespace DepupOfficeDesktop.Forms
             Control body = _historySnapshot switch
             {
                 { Count: > 0 } recent => RecentCovers(width, recent),
-                { Count: 0 } => CreateEmptyState(width, CardIcon.Folder, "Belum ada berkas", "Dokumen yang Anda buka akan muncul di sini."),
+                { Count: 0 } => new Panel { Width = width, Height = 0, Margin = Padding.Empty },   // Android: bagian disembunyikan bila kosong
                 _ when _historyError != null => CreateEmptyState(width, CardIcon.Folder, "Riwayat tidak dapat dimuat", _historyError),
                 _ => CreateEmptyState(width, CardIcon.Folder, "Memuat riwayat…", "")
             };
             ReplaceRows(panel, body);
+            if (_homeRecentHeader is { IsDisposed: false } hdr) hdr.Visible = _historySnapshot is not { Count: 0 };
         }
+
+        private Control? _homeRecentHeader;
 
         private void ShowHistoryRows()
         {
