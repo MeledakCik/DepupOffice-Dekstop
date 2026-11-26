@@ -244,7 +244,7 @@ namespace DepupOfficeDesktop.Forms
             btnPrint.Click += (s, e) =>
             {
                 string t = string.IsNullOrWhiteSpace(_sheetTitleEt.Text) ? "Spreadsheet Excel" : _sheetTitleEt.Text.Trim();
-                PrintHelper.PrintSpreadsheet(this, t, GetExportRows());
+                PrintHelper.PrintSpreadsheet(this, t, GetExportRows(), _matrix.Select((r, idx) => (r, idx)).Where(x => x.r.Any(c => c.IsBold)).Select(x => x.idx).ToHashSet());
             };
 
             var btnExport = Theme.CreateButton("Ekspor lembar kerja", true, Theme.TEAL, Theme.S(36));

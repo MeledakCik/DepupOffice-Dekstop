@@ -16,6 +16,8 @@ namespace DepupOfficeDesktop.Core
     {
         public List<RecentEntry> RecentFiles { get; set; } = new();
         public HashSet<string> Bookmarks { get; set; } = new();
+        /// <summary>Berkas yang disematkan di Beranda (Android Meta.pin), terbaru di depan.</summary>
+        public List<string> PinnedFiles { get; set; } = new();
         public List<ShareEntry> Shares { get; set; } = new();
         public LastJobEntry? LastJob { get; set; }
 
@@ -357,6 +359,19 @@ namespace DepupOfficeDesktop.Core
         {
             Config.RecentFiles.RemoveAll(r => string.Equals(r.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
             SaveConfig();
+        }
+
+        public static bool IsPinned(string filePath) => Config.PinnedFiles.Contains(filePath, StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Sematkan / lepas berkas dari deret "Disematkan" di Beranda. Mengembalikan status baru.</summary>
+        public static bool TogglePin(string filePath)
+        {
+            bool on = IsPinned(filePath);
+            Config.PinnedFiles.RemoveAll(p => string.Equals(p, filePath, StringComparison.OrdinalIgnoreCase));
+            if (!on) Config.PinnedFiles.Insert(0, filePath);
+            if (Config.PinnedFiles.Count > 24) Config.PinnedFiles.RemoveRange(24, Config.PinnedFiles.Count - 24);
+            SaveConfig();
+            return !on;
         }
 
         public static bool IsBookmarked(string filePath)

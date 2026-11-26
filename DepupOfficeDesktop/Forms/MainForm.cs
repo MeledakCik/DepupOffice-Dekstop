@@ -60,13 +60,20 @@ namespace DepupOfficeDesktop.Forms
             {
                 if (e.Data?.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0 && files.All(AppStorage.IsSupportedDocument))
                     e.Effect = DragDropEffects.Copy;
+                else if (LinkFetch.ExtractUrl(e.Data?.GetData(DataFormats.UnicodeText) as string) != null)
+                    e.Effect = DragDropEffects.Link;   // link dari browser: Buka dari link
                 else
                     e.Effect = DragDropEffects.None;
             };
             DragEnter += _dragEnterHandler;
             _dragDropHandler = (s, e) =>
             {
-                if (e.Data?.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0) return;
+                if (e.Data?.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0)
+                {
+                    if (e.Data?.GetData(DataFormats.UnicodeText) is string dropped && LinkFetch.ExtractUrl(dropped) != null)
+                        BeginInvoke(new Action(() => RunGuarded(() => OpenFromLinkFlow(dropped))));
+                    return;
+                }
 
                 // Satu drop bisa terkirim ke lebih dari satu kontrol / terulang: abaikan drop identik dalam 1,5 detik.
                 string key = string.Join("|", files);
@@ -122,6 +129,12 @@ namespace DepupOfficeDesktop.Forms
                     CloseEmbeddedViewer();
                     _searchBox.Input.Focus();
                     _searchBox.Input.SelectAll();
+                    return;
+                }
+                if (e.Control && !e.Alt && !e.Shift && e.KeyCode == Keys.L && _activeViewer == null)
+                {
+                    e.SuppressKeyPress = true;
+                    RunGuarded(() => OpenFromLinkFlow(null));
                     return;
                 }
                 if (e.Control && !e.Alt && e.KeyCode == Keys.O)

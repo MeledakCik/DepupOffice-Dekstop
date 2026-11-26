@@ -254,6 +254,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 PdfPasswordException => ex.Message,
                 ProtectedDocException => ex.Message,
+                LinkFetch.LinkException => ex.Message,
                 PdfException pe => "Struktur PDF tidak bisa dibaca: " + pe.Message,
                 UnauthorizedAccessException => "Akses berkas ditolak. Tutup berkas di aplikasi lain lalu coba lagi.",
                 IOException => "Berkas sedang dipakai aplikasi lain atau tidak bisa ditulis: " + ex.Message,

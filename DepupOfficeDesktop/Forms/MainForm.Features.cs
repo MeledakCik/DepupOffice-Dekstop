@@ -53,7 +53,14 @@ namespace DepupOfficeDesktop.Forms
             string name = Path.GetFileName(src);
             using var d = new Dlg("Dokumen Terlindungi", name + " • Pengaturan Keamanan");
             d.Label("Pilih tingkat keamanan & akses dokumen:", true);
-            var chkCover = d.Check("Bungkus Sampul DepUp & Integritas HMAC (hanya bisa dibuka di DepUp Office)", true);
+            var chkCover = d.Check("Bungkus Sampul DepUp + enkripsi AES-256-GCM (hanya bisa dibuka di DepUp Office dengan kode akses)", true);
+            var lblCode = d.Label("Kode akses (dibagikan ke pembaca/murid, min. " + SecurePackage.MIN_CODE_LENGTH + " karakter):");
+            var fCode = d.Field("", SecurePackage.GenerateAccessCode());
+            fCode.Font = new Font(FontFamily.GenericMonospace, 12f);
+            fCode.CharacterCasing = CharacterCasing.Upper;
+            fCode.MaxLength = SecurePackage.MAX_CODE_LENGTH + 16;
+            var btnNewCode = d.SmallButton("Buat kode baru", () => fCode.Text = SecurePackage.GenerateAccessCode());
+            d.Row(btnNewCode);
             var chkUser = d.Check("Kunci dengan Password Pembuka (User Password)", false);
             var fUser = d.Field("Password pembuka:", "", true);
             var fUser2 = d.Field("Konfirmasi password pembuka:", "", true);
@@ -63,42 +70,192 @@ namespace DepupOfficeDesktop.Forms
             var chkPrint = d.Check("Proteksi Anti-Cetak (Print Restriction)", true);
             var chkEdit = d.Check("Proteksi Anti-Edit / Ubah Dokumen", true);
             var chkTeacher = d.Check("Set Password Edit Guru / Pemilik (Master Password)", true);
-            var fTeacher = d.Field("Password guru / pemilik (untuk membuka batasan & ekspor PDF asli):", "", true);
-            chkTeacher.CheckedChanged += (s, e) => fTeacher.Enabled = chkTeacher.Checked;
-            d.Label("Catatan: sampul DepUp memakai format yang sama dengan DepUp Office Android & iOS — dokumen bisa dibuka di HP maupun PC.", false, Theme.MUTED, 8);
+            var fTeacher = d.Field("Password edit guru (untuk membuka batasan & ekspor PDF asli):", "", true);
+            void Sync()
+            {
+                lblCode.Enabled = fCode.Enabled = btnNewCode.Enabled = chkCover.Checked;
+                // Dokumen Terlindungi selalu butuh password edit guru (sama seperti Android/iOS)
+                if (chkCover.Checked) chkTeacher.Checked = true;
+                chkTeacher.Enabled = !chkCover.Checked;
+                fTeacher.Enabled = chkTeacher.Checked;
+            }
+            chkCover.CheckedChanged += (s, e) => Sync();
+            chkTeacher.CheckedChanged += (s, e) => Sync();
+            Sync();
+            d.Label("Isi dienkripsi dengan kunci dari kode akses — tidak ada kunci di dalam aplikasi. Dokumen bisa dibuka di DepUp Office PC, Android & iPhone yang punya kode akses.", false, Theme.MUTED, 8);
             d.Action("Terapkan Proteksi", true, () =>
             {
                 string userPw = chkUser.Checked ? fUser.Text.Trim() : "";
                 if (chkUser.Checked && userPw.Length < 4) { Theme.Toast(d, "Password pembuka minimal 4 karakter"); return; }
                 if (chkUser.Checked && userPw != fUser2.Text.Trim()) { Theme.Toast(d, "Konfirmasi password pembuka tidak sama"); return; }
                 string teacher = chkTeacher.Checked ? fTeacher.Text.Trim() : "";
-                if (chkTeacher.Checked && teacher.Length < 4) { Theme.Toast(d, "Password guru/pemilik minimal 4 karakter"); return; }
-                if (!chkTeacher.Checked && chkCover.Checked)
+                string code = fCode.Text;
+                if (chkCover.Checked)
                 {
-                    // Tanpa password guru, PDF asli tidak akan pernah bisa diekspor kembali.
-                    if (MessageBox.Show(d, "Tanpa password guru/pemilik, PDF asli TIDAK akan bisa diekspor kembali dari dokumen terlindungi. Lanjutkan?", "Konfirmasi", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                    var err = SecurePackage.ValidateNewCode(code);
+                    if (err != null) { Theme.Toast(d, err); return; }
+                    if (teacher.Length < 6 || teacher == "123456" || teacher.Distinct().Count() == 1)
+                    { Theme.Toast(d, "Password edit minimal 6 karakter dan tidak mudah ditebak"); return; }
+                    if (SecurePackage.NormalizeCode(teacher) == SecurePackage.NormalizeCode(code))
+                    { Theme.Toast(d, "Password edit guru harus berbeda dari kode akses murid"); return; }
                 }
+                else if (chkTeacher.Checked && teacher.Length < 4) { Theme.Toast(d, "Password guru/pemilik minimal 4 karakter"); return; }
                 d.Close();
                 string outPdf = AppStorage.NewOut(AppStorage.BaseName(name) + "_terlindungi", "pdf");
+                bool cover = chkCover.Checked;
                 if (Ui.Busy(this, "Menerapkan proteksi dokumen…", _ =>
-                    PdfToolsX.ProtectDocument(src, outPdf, chkCover.Checked, userPw, !chkCopy.Checked, !chkPrint.Checked, !chkEdit.Checked, teacher)))
+                    PdfToolsX.ProtectDocument(src, outPdf, cover, userPw, !chkCopy.Checked, !chkPrint.Checked, !chkEdit.Checked, teacher, code)))
+                {
+                    if (cover) ShowAccessCode(SecurePackage.Grouped(code));
                     Done("Dokumen Terlindungi", outPdf, "Dokumen Terlindungi Berhasil Dibuat",
-                        chkCover.Checked ? "Hanya bisa dibuka di DepUp Office (PC, Android, iOS)." : "PDF dikunci AES-256 + izin akses.");
+                        cover ? "Sampul, enkripsi AES-256-GCM, integritas HMAC, kode akses, dan password edit guru berhasil diterapkan." : "PDF dikunci AES-256 + izin akses.");
+                }
+                else { try { File.Delete(outPdf); } catch { } }
             });
             d.Action("Batal", false, d.Close, Theme.TEXT);
             d.ShowDialog(this);
+        }
+
+        /// <summary>
+        /// Buka berkas dari LINK (Android 4.4.1): Google Drive/Docs, share.google, LMS. Internet hanya dipakai di sini, setelah
+        /// pengguna menyetujui unduhan; berkas disimpan di folder DepupOffice lalu dibuka seperti berkas biasa.
+        /// </summary>
+        private void OpenFromLinkFlow(string? shared)
+        {
+            string? clip = null;
+            try { if (Clipboard.ContainsText()) clip = Clipboard.GetText(); } catch { }
+            string initial = shared ?? (LinkFetch.ExtractUrl(clip) != null ? clip! : "");
+            using var d = new Dlg("Buka dari Link", "Tempel link berkas PDF, Word, Excel, atau PowerPoint (Google Drive, Google Docs, share.google, LMS).", 560);
+            var f = d.Field("Link (https://…):", initial.Trim());
+            var note = d.Label("Berkas diunduh lewat HTTPS dari server pemilik link, tanpa cookie atau akun Anda. Selain langkah ini, DepUp Office tetap bekerja offline.", false, Theme.MUTED, 8);
+            string? text = null;
+            d.Action("Unduh & buka", true, () =>
+            {
+                if (LinkFetch.ExtractUrl(f.Text) == null) { Theme.Toast(d, "Tempel link yang diawali https://"); return; }
+                text = f.Text; d.Close();
+            });
+            d.Action("Batal", false, d.Close, Theme.TEXT);
+            d.Shown += (s, e) => { f.Focus(); f.SelectAll(); };
+            d.ShowDialog(this);
+            if (text == null) return;
+            var url = LinkFetch.ExtractUrl(text)!;
+            var title = LinkFetch.TitleOf(text, url);
+            var (ok, res) = Ui.Busy(this, "Mengunduh berkas dari link…", _ => LinkFetch.Download(url, title));
+            if (!ok || res == null) return;
+            var outPath = AppStorage.NamedOut(Path.GetFileNameWithoutExtension(res.Name), LinkFetch.Ext(res.Kind));
+            File.WriteAllBytes(outPath, res.Bytes);
+            AppStorage.AddRecent(outPath);
+            OpenDocument(outPath);
+        }
+
+        /// <summary>Tampilkan kode akses setelah dokumen dibuat. Kode tidak disimpan di dokumen; guru harus mencatatnya.</summary>
+        private void ShowAccessCode(string code)
+        {
+            using var d = new Dlg("Kode Akses Dokumen", "Bagikan kode ini kepada pembaca (murid) lewat jalur terpisah dari berkasnya. Kode tidak tersimpan di dalam dokumen dan tidak bisa dipulihkan bila hilang.", 480);
+            d.ControlBox = false;
+            var lbl = new TextBox
+            {
+                Text = code, ReadOnly = true, BorderStyle = BorderStyle.None, TextAlign = HorizontalAlignment.Center,
+                Font = new Font(FontFamily.GenericMonospace, 22f, FontStyle.Bold), BackColor = Theme.SURFACE, ForeColor = Theme.TEXT
+            };
+            d.Add(lbl, 8);
+            d.Label("Dokumen bisa dibuka di DepUp Office PC, Android maupun iPhone dengan kode ini.", false, Theme.MUTED, 8);
+            d.Action("Selesai", true, d.Close);
+            d.Action("Salin", false, () =>
+            {
+                try { CopySensitive(code); Theme.Toast(d, "Kode akses disalin"); } catch { Theme.Toast(d, "Papan klip sedang dipakai aplikasi lain"); }
+            }, Theme.TEXT);
+            d.ShowDialog(this);
+        }
+
+        /// <summary>Salin ke papan klip tanpa riwayat papan klip / sinkron cloud Windows (padanan EXTRA_IS_SENSITIVE Android).</summary>
+        internal static void CopySensitive(string value)
+        {
+            var data = new DataObject();
+            data.SetData(DataFormats.UnicodeText, value);
+            data.SetData("ExcludeClipboardContentFromMonitorProcessing", new MemoryStream(new byte[] { 1, 0, 0, 0 }));
+            data.SetData("CanIncludeInClipboardHistory", new MemoryStream(new byte[4]));
+            data.SetData("CanUploadToCloudClipboard", new MemoryStream(new byte[4]));
+            Clipboard.SetDataObject(data, true);
+        }
+
+        /// <summary>Minta kode akses saat membuka dokumen v3. null = dibatalkan.</summary>
+        private (string code, bool remember)? AskAccessCode(bool wrong)
+        {
+            using var d = new Dlg("Dokumen Terlindungi", wrong ? "Kode akses salah. Periksa kembali kode dari pembuat dokumen."
+                : "Dokumen ini dilindungi. Masukkan kode akses dari guru/pembuat dokumen.", 440);
+            var f = d.Field("Kode akses", "");
+            f.Font = new Font(FontFamily.GenericMonospace, 12f);
+            f.CharacterCasing = CharacterCasing.Upper;
+            f.MaxLength = SecurePackage.MAX_CODE_LENGTH + 16;
+            var remember = d.Check("Ingat kode di komputer ini", true);
+            (string, bool)? result = null;
+            d.Action("Buka", true, () => { result = (f.Text, remember.Checked); d.Close(); });
+            d.Action("Batal", false, d.Close, Theme.TEXT);
+            d.Shown += (s, e) => f.Focus();
+            d.ShowDialog(this);
+            return result;
+        }
+
+        /// <summary>
+        /// Buka Dokumen Terlindungi. v3: coba kode yang diingat (DPAPI), lalu minta ke pengguna (maks. 8 percobaan,
+        /// diperlambat setelah 3 kali salah). Mengembalikan (PDF asli, kode akses) atau null bila dibatalkan.
+        /// </summary>
+        private (byte[] plain, string? code)? OpenProtectedWithCode(byte[] bytes)
+        {
+            var info = ProtectedDoc.InfoOf(bytes);
+            if (info.Version != 3)
+            {
+                var (ok1, r1) = Ui.Busy(this, "Memverifikasi & membuka Dokumen Terlindungi…", _ => ProtectedDoc.Open(bytes));
+                return ok1 && r1 != null ? (r1, null) : null;
+            }
+            string? code = AccessCodeVault.Load(info.DocId);
+            bool fromVault = code != null, remember = false, wrong = false;
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                if (code == null)
+                {
+                    var picked = AskAccessCode(wrong);
+                    if (picked == null) return null;
+                    (code, remember) = picked.Value; fromVault = false;
+                }
+                string tryCode = code;
+                byte[]? plain = null; Exception? error = null;
+                Ui.Busy<int>(null, "Memverifikasi kode akses…", _ =>
+                {
+                    try { plain = ProtectedDoc.Open(bytes, tryCode); } catch (Exception ex) { error = ex; }
+                    return 0;
+                });
+                if (plain != null)
+                {
+                    if (!fromVault) { if (remember) AccessCodeVault.Save(info.DocId, tryCode); else AccessCodeVault.Forget(info.DocId); }
+                    return (plain, tryCode);
+                }
+                if (error is SecurePackage.AccessCodeException ace)
+                {
+                    if (fromVault) AccessCodeVault.Forget(info.DocId);
+                    code = null; wrong = !ace.Missing;
+                    if (attempt >= 3) System.Threading.Thread.Sleep(1000 * (attempt - 2));   // perlambat tebakan beruntun
+                    continue;
+                }
+                Ui.ShowError(this, error ?? new ProtectedDocException("Dokumen tidak bisa dibuka."));
+                return null;
+            }
+            MessageBox.Show(this, "Terlalu banyak percobaan kode akses. Tutup dan buka kembali dokumen.", "Dokumen Terlindungi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return null;
         }
 
         /// <summary>Buka Dokumen Terlindungi di Reader mode aman (salinan terdekripsi sementara, dihapus saat ditutup).</summary>
         private async Task<bool> OpenProtectedDocumentAsync(string path)
         {
             byte[] original;
+            string? accessCode;
             try
             {
                 var bytes = File.ReadAllBytes(path);
-                var (ok, res) = Ui.Busy(this, "Memverifikasi & membuka Dokumen Terlindungi…", _ => ProtectedDoc.Open(bytes));
-                if (!ok || res == null) return true;
-                original = res;
+                var opened = OpenProtectedWithCode(bytes);
+                if (opened == null) return true;
+                (original, accessCode) = opened.Value;
             }
             catch (Exception ex) { Ui.ShowError(this, ex); return true; }
 
@@ -126,11 +283,17 @@ namespace DepupOfficeDesktop.Forms
                 AllowPrint = allowPrint,
                 AllowCopy = allowCopy,
                 OnClosed = () => { ProtectedDoc.DeleteTemp(tmp); Array.Clear(original); },
+                ForgetAccessCode = accessCode == null ? null : owner =>
+                {
+                    var id = ProtectedDoc.DocIdOf(protectedBytes);
+                    if (id != null) AccessCodeVault.Forget(id);
+                    MessageBox.Show(owner, "Kode akses tidak lagi diingat di komputer ini.", "Dokumen Terlindungi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                },
                 ExportOriginal = owner =>
                 {
                     var t = Ui.AskText(owner, "Ekspor PDF Asli", "Masukkan password guru / pemilik dokumen:", true);
                     if (t == null) return;
-                    if (!ProtectedDoc.VerifyEditPassword(protectedBytes, t)) { MessageBox.Show(owner, "Password guru/pemilik salah.", "Ekspor PDF Asli", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                    if (!ProtectedDoc.VerifyEditPassword(protectedBytes, t, accessCode)) { MessageBox.Show(owner, "Password guru/pemilik salah.", "Ekspor PDF Asli", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
                     string outPdf = AppStorage.NewOut(AppStorage.BaseName(Path.GetFileName(path)) + "_asli", "pdf");
                     try
                     {

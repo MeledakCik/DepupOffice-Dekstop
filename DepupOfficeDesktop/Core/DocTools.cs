@@ -322,9 +322,42 @@ namespace DepupOfficeDesktop.Core
         private static readonly string[] KeyWords = { "tujuan", "kesimpulan", "penting", "total", "ringkasan", "rekomendasi", "hasil", "catatan", "pasal", "syarat", "wajib", "batas waktu", "jumlah" };
 
         /// <summary>Kalimat/paragraf kunci (bobot panjang + kata kunci + posisi awal) — algoritma Android, ditambah bobot posisi.</summary>
+        /// <summary>
+        /// Baris PDF yang terpotong (tanpa tanda akhir kalimat) disambung menjadi satu paragraf; judul pendek (≤ 4 kata,
+        /// tanpa tanda baca akhir) berdiri sendiri — sama dengan Android/iOS 4.4.
+        /// </summary>
+        internal static List<string> Paragraphs(string text)
+        {
+            const string enders = ".!?:;)\"”";
+            var output = new List<string>();
+            var cur = new System.Text.StringBuilder();
+            foreach (var raw in text.Replace("\r", "").Replace('\f', '\n').Split('\n'))
+            {
+                var line = Regex.Replace(raw, @"\s+", " ").Trim();
+                if (line.Length == 0) { if (cur.Length > 0) { output.Add(cur.ToString()); cur.Clear(); } continue; }
+                if (cur.Length == 0 && line.Split(' ').Length <= 4 && !(enders + ",").Contains(line[^1])) { output.Add(line); continue; }
+                if (cur.Length > 0) cur.Append(' ');
+                cur.Append(line);
+                if (enders.Contains(line[^1])) { output.Add(cur.ToString()); cur.Clear(); }
+            }
+            if (cur.Length > 0) output.Add(cur.ToString());
+            return output;
+        }
+
+        private static readonly Regex NonWord = new(@"[^A-Za-z0-9_]+");
+
         public static List<string> KeyPoints(string text, int take = 5)
         {
-            var paras = text.Split('\n').Select(p => Regex.Replace(p, @"\s+", " ").Trim()).Where(p => p.Length > 25).ToList();
+            // paragraf (hampir) sama dengan yang sudah dipilih dilewati, mis. isi/kop halaman yang berulang (Jaccard ≥ 0,8)
+            var kept = new List<HashSet<string>>();
+            var paras = Paragraphs(text).Where(p =>
+            {
+                if (p.Length <= 25) return false;
+                var words = NonWord.Split(p.ToLowerInvariant()).Where(x => x.Length > 0).ToHashSet();
+                bool dup = kept.Any(k => (double)words.Count(k.Contains) / Math.Max(1, words.Union(k).Count()) >= 0.8);
+                if (!dup) kept.Add(words);
+                return !dup;
+            }).ToList();
             if (paras.Count == 0) return new List<string> { text.Length > 200 ? text[..200] : text };
             var scored = paras.Select((p, i) =>
             {
@@ -375,10 +408,10 @@ namespace DepupOfficeDesktop.Core
                       .OrderByDescending(f => { try { return File.GetLastWriteTimeUtc(f); } catch { return DateTime.MinValue; } });
         }
 
-        private static readonly Dictionary<string, (DateTime stamp, string text)> _textCache = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime stamp, string text)> _textCache = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>Cari kata kunci di dalam isi berkas (Word/Excel/PPTX langsung, PDF lewat OCR; hasil OCR di-cache per sesi).</summary>
-        public static List<SearchHit> Search(string q, int maxFiles, int maxPdfPages, Action<int, int, string>? progress = null, Func<bool>? cancelled = null)
+        public static List<SearchHit> Search(string q, int maxFiles, int maxPdfPages, Action<int, int, string>? progress = null, Func<bool>? cancelled = null, Action<SearchHit>? onHit = null)
         {
             var hits = new List<SearchHit>();
             var files = SearchCandidates().Take(maxFiles).ToList();
@@ -406,7 +439,9 @@ namespace DepupOfficeDesktop.Core
                     string where = "";
                     if (f.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
                         where = "Halaman " + (text[..idx].Count(ch => ch == '\f') + 1);
-                    hits.Add(new SearchHit(f, Regex.Replace(text[s..e], @"\s+", " "), where));
+                    var hit = new SearchHit(f, Regex.Replace(text[s..e], @"\s+", " "), where);
+                    hits.Add(hit);
+                    onHit?.Invoke(hit);
                 }
                 catch { }
             }

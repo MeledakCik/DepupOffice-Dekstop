@@ -12,7 +12,7 @@ namespace DepupOfficeDesktop.Forms
     /// <summary>
     /// Form Privacy Policy untuk Depup Office Desktop v2.2.0:
     /// - Menggunakan kontrol WebBrowser bawaan .NET (Zero NuGet Dependencies).
-    /// - Memuat https://depupoffice-privacy.vercel.app/ saat online.
+    /// - Memuat https://depupstudio.com/office/privacy-policy saat online.
     /// - Fallback otomatis ke file lokal Documents\DepupOffice\privacy.html jika offline atau gagal memuat.
     /// - Menangani NewWindow & Navigating agar link saweria.co/depupdonate, mailto:depupdev@gmail.com,
     ///   dan github.com/MeledakCik/DepupOffice selalu dibuka di browser/aplikasi eksternal via Process.Start.

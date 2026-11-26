@@ -204,14 +204,15 @@ namespace DepupOfficeDesktop.Core
         /// Dokumen Terlindungi lengkap (alur ProtectedDocumentManager Android): kunci izin + password pembuka opsional
         /// (AES-256), lalu dibungkus Sampul DepUp + HMAC bila <paramref name="coverHmac"/>.
         /// </summary>
-        public static void ProtectDocument(string src, string outPath, bool coverHmac, string userPw, bool canCopy, bool canPrint, bool canModify, string teacherPw)
+        public static void ProtectDocument(string src, string outPath, bool coverHmac, string userPw, bool canCopy, bool canPrint, bool canModify, string teacherPw, string accessCode = "")
         {
+            if (coverHmac && string.IsNullOrWhiteSpace(teacherPw)) throw new ArgumentException("Password edit guru wajib untuk Dokumen Terlindungi.");
             string ownerPw = string.IsNullOrWhiteSpace(teacherPw) ? Guid.NewGuid().ToString() : teacherPw;
             var perms = new PdfSave.Perms(canPrint, canCopy, canModify, canModify);
             var f = OpenPdf(src);
             byte[] locked;
             using (var ms = new MemoryStream()) { PdfSave.Write(f, ms, new PdfSave.Lock(userPw, ownerPw, perms)); locked = ms.ToArray(); }
-            if (coverHmac) ProtectedDoc.Protect(locked, ownerPw, outPath);
+            if (coverHmac) { try { ProtectedDoc.Protect(locked, accessCode, teacherPw, outPath); } finally { Array.Clear(locked); } }
             else File.WriteAllBytes(outPath, locked);
         }
 
