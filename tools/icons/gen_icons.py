@@ -41,6 +41,13 @@ for name, vw, vh, paths in out:
                    ', '.join('%gf' % v for v in m)) for d, eo, c, m in paths)
     L.append('            [%s] = new Vec(%gf, %gf, new[] { %s }),' % (cs(name), vw, vh, ps))
 L += ['        };', '    }', '}', '']
-dst = os.path.join(os.path.dirname(__file__), '..', '..', 'DepupOfficeDesktop', 'Controls', 'DepupIcons.g.cs')
+root = os.path.join(os.path.dirname(__file__), '..', '..')
+dst = os.path.join(root, 'DepupOfficeDesktop', 'Controls', 'DepupIcons.g.cs')
 open(dst, 'w').write('\n'.join(L))
 print(len(out), 'ikon →', os.path.normpath(dst))
+# versi Mac (Avalonia): data sama, namespace sendiri
+mac = os.path.join(root, 'mac', 'DepupOffice.Mac', 'Ui', 'MacIcons.g.cs')
+if os.path.isdir(os.path.dirname(mac)):
+    M = '\n'.join(L).replace('namespace DepupOfficeDesktop.Controls', 'namespace DepupOffice.Mac').replace('class DepupIcons', 'class MacIcons')
+    open(mac, 'w').write(M)
+    print(len(out), 'ikon →', os.path.normpath(mac))

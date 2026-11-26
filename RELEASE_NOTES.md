@@ -12,3 +12,8 @@ Tampilan kini sama dengan DepUp Office Android.
 ## Unduhan
 - `DepupOffice-v4.4.3-win-x64.exe` — satu berkas, langsung jalan (Windows 10/11 64-bit, tanpa instal .NET).
 - `DepupOffice-v4.4.3-win-x64.zip` — berkas yang sama dalam zip.
+- `DepupOffice-v4.4.3-macos-arm64.dmg` — Mac Apple Silicon (M1–M4).
+- `DepupOffice-v4.4.3-macos-x64.dmg` — Mac Intel.
+
+### Mac
+Buka `.dmg`, seret **Depup Office** ke **Applications**. Saat pertama dibuka, klik kanan → **Open** → **Open** (aplikasi belum ditandatangani Apple).

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>DepupOffice</AssemblyName>
+    <RootNamespace>DepupOffice.Mac</RootNamespace>
+    <Version>4.4.3</Version>
+    <Product>Depup Office for Mac</Product>
+    <Company>Depup Cloud</Company>
+    <Description>Depup Office v4.4.3 - FREE, Offline, Zero Cloud Upload.</Description>
+    <RuntimeIdentifiers>osx-arm64;osx-x64</RuntimeIdentifiers>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+    <!-- PDFium (render PDF, termasuk PDF ber-password) dengan pustaka asli macOS arm64 & x64.
+         2.7.0-alpha.1 dipakai karena memperbaiki bug memori saat merender anotasi/form di 2.6.0. -->
+    <PackageReference Include="Docnet.Core" Version="2.7.0-alpha.1" />
+    <!-- Versi yang sama dengan yang dipakai Avalonia 11.2.x -->
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Depup.Shared/Depup.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="../../DepupOfficeDesktop/privacy.html" Link="privacy.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
