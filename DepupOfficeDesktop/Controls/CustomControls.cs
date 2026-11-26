@@ -489,6 +489,18 @@ namespace DepupOfficeDesktop.Controls
 
         private void DrawIcon(Graphics g, Rectangle chip, Color color)
         {
+            // ikon navigasi Android (Beranda · Dokumen · Buat · Alat · Saya)
+            string? android = Icon switch
+            {
+                NavItemIcon.Home => "home", NavItemIcon.Docs => "folder", NavItemIcon.Create => "plus",
+                NavItemIcon.Tools => "tools", NavItemIcon.User => "user", NavItemIcon.Pdf => "pdf", _ => null
+            };
+            if (android != null)
+            {
+                float side = 20 * Theme.Scale;
+                DepupIcons.Draw(g, android, new RectangleF(chip.X + (chip.Width - side) / 2f, chip.Y + (chip.Height - side) / 2f, side, side), color);
+                return;
+            }
             float scale = Theme.Scale;
             float x = chip.X + (chip.Width - 16 * scale) / 2f;
             float y = chip.Y + (chip.Height - 16 * scale) / 2f;
@@ -757,6 +769,15 @@ namespace DepupOfficeDesktop.Controls
             if (_hover || _down)
                 using (var b = new SolidBrush(Theme.SURFACE2)) g.FillPath(b, shape);
 
+            {
+                float side = Math.Min(Width, Height) * 0.55f;
+                string name = _glyph switch { CircleGlyph.Person => "user", CircleGlyph.Search => "search", CircleGlyph.Moon => "moon", _ => "bright" };
+                DepupIcons.Draw(g, name, new RectangleF((Width - side) / 2f, (Height - side) / 2f, side, side), Theme.TEXT);
+                if (Focused && ShowFocusCues)
+                    using (var fp = new Pen(Theme.ACCENT, 2f)) g.DrawEllipse(fp, 1.5f, 1.5f, Width - 4f, Height - 4f);
+                return;
+            }
+#pragma warning disable CS0162
             float s = Theme.Scale * Math.Min(Width, Height) / (44f * Theme.Scale), cx = Width / 2f, cy = Height / 2f;
             using var pen = new Pen(Theme.TEXT, 1.7f * Theme.Scale) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
             float k = s * Theme.Scale;
@@ -818,6 +839,9 @@ namespace DepupOfficeDesktop.Controls
         /// <summary>Gambar logo pada kotak <paramref name="r"/> (ruang desain 2000×2000, sama dengan vektor Android).</summary>
         public static void Draw(Graphics g, RectangleF r, bool tile, Color mark)
         {
+            // vektor Android ic_logo_tile.xml / ic_logo.xml apa adanya
+            if (tile && mark.ToArgb() == Color.White.ToArgb() && DepupIcons.Has("logo_tile")) { DepupIcons.Draw(g, "logo_tile", r, mark); return; }
+            if (!tile && DepupIcons.Has("logo")) { DepupIcons.Draw(g, "logo", r, mark); return; }
             g.SmoothingMode = SmoothingMode.AntiAlias;
             float u = Math.Min(r.Width, r.Height) / 2000f;
             PointF P(float x, float y) => new(r.X + x * u, r.Y + y * u);
@@ -910,27 +934,30 @@ namespace DepupOfficeDesktop.Controls
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
             if (rect.Width <= 0 || rect.Height <= 0) return;
-            using (var track = Theme.RoundedRect(rect, Theme.S(9)))
-            using (var b = new SolidBrush(Theme.SURFACE2))
-                g.FillPath(b, track);
+            // Android segmented: trek pil SURFACE bergaris LINE, ibu jari pil TINTA (INK) dengan teks ON_INK
+            using (var track = Theme.RoundedRect(rect, rect.Height / 2))
+            {
+                using (var b = new SolidBrush(Theme.SURFACE)) g.FillPath(b, track);
+                using (var lp = new Pen(Theme.LINE)) g.DrawPath(lp, track);
+            }
             for (int i = 0; i < _items.Length; i++)
             {
                 var r = Rectangle.Round(Slot(i));
                 if (i == _sel)
                 {
-                    using var thumb = Theme.RoundedRect(r, Theme.S(6));
-                    using var tb = new SolidBrush(Theme.Dark ? Theme.SURFACE3 : Theme.SURFACE);
+                    using var thumb = Theme.RoundedRect(r, r.Height / 2);
+                    using var tb = new SolidBrush(Theme.INK);
                     g.FillPath(tb, thumb);
                     if (Focused && ShowFocusCues)
                         using (var fp = new Pen(Theme.ACCENT, 2f)) g.DrawPath(fp, thumb);
                 }
                 else if (i == _hover)
                 {
-                    using var hp = Theme.RoundedRect(r, Theme.S(6));
-                    using var hb = new SolidBrush(Theme.SURFACE3);
+                    using var hp = Theme.RoundedRect(r, r.Height / 2);
+                    using var hb = new SolidBrush(Theme.SURFACE2);
                     g.FillPath(hb, hp);
                 }
-                TextRenderer.DrawText(g, _items[i], Font, r, i == _sel ? Theme.TEXT : Theme.MUTED,
+                TextRenderer.DrawText(g, _items[i], Font, r, i == _sel ? Theme.ON_INK : Theme.TEXT,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
             }
         }

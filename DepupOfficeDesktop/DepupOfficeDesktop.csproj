@@ -9,14 +9,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>DepupOffice</AssemblyName>
+    <ApplicationIcon>Assets\depup.ico</ApplicationIcon>
     <RootNamespace>DepupOfficeDesktop</RootNamespace>
-    <Version>4.4.2</Version>
+    <Version>4.4.3</Version>
     <Company>Depup Cloud</Company>
-    <Product>Depup Office Desktop v4.4.2</Product>
-    <Description>Depup Office Desktop v4.4.2 - FREE, Offline, Zero Cloud Upload. Donasi sukarela via https://saweria.co/depupdonate (tidak membuka fitur premium, diproses di luar aplikasi)</Description>
+    <Product>Depup Office Desktop v4.4.3</Product>
+    <Description>Depup Office Desktop v4.4.3 - FREE, Offline, Zero Cloud Upload. Donasi sukarela via https://saweria.co/depupdonate (tidak membuka fitur premium, diproses di luar aplikasi)</Description>
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\depup.ico" LogicalName="DepupOfficeDesktop.depup.ico" />
     <InternalsVisibleTo Include="DepupOfficeDesktop.Tests" />
     <Content Include="Assets\Fonts\*.ttf;Assets\Fonts\OFL.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

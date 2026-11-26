@@ -99,6 +99,6 @@ public sealed class NotesTests
             Notes.Delete(b.Id);
             Assert.Equal(new[] { "A" }, Notes.All().Select(n => n.Title));
         }
-        finally { File.Delete(path); }
+        finally { File.Delete(path); Notes.UseFileForTests(null); }
     }
 }

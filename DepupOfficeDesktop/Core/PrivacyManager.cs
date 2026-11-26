@@ -18,7 +18,7 @@ namespace DepupOfficeDesktop.Core
         public const string OfficialGithubUrl = "https://github.com/MeledakCik/DepupOffice";
 
         public const string ComplianceSummaryText =
-            "Depup Office Desktop v4.4.2 - FREE, Offline, Zero Cloud Upload. " +
+            "Depup Office Desktop v4.4.3 - FREE, Offline, Zero Cloud Upload. " +
             "Donasi sukarela via https://saweria.co/depupdonate (tidak membuka fitur premium, diproses di luar aplikasi)";
 
         /// <summary>

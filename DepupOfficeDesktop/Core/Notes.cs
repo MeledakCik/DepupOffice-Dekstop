@@ -214,7 +214,7 @@ namespace DepupOfficeDesktop.Core
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DepupOfficeDesktop", "notes.json");
 
         /// <summary>Hanya untuk uji: arahkan penyimpanan ke berkas lain.</summary>
-        internal static void UseFileForTests(string path) { lock (Gate) { _pathOverride = path; _cache = null; } }
+        internal static void UseFileForTests(string? path) { lock (Gate) { _pathOverride = path; _cache = null; } }
 
         private static List<Note> Loaded()
         {

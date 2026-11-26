@@ -27,6 +27,13 @@ namespace DepupOfficeDesktop
             AppStorage.Initialize();
             Theme.Init();                      // tema terang / gelap (Ikuti Windows bawaan, seperti Android)
             ProtectedDoc.CleanupLeftovers();   // salinan terdekripsi yang tertinggal (aplikasi ditutup paksa)
+            // semua jendela (termasuk dialog) memakai ikon logo DepUp, bukan ikon bawaan WinForms
+            Application.Idle += (_, _) =>
+            {
+                if (Theme.AppIcon is not { } icon) return;
+                foreach (Form f in Application.OpenForms)
+                    if (f.ShowIcon && !ReferenceEquals(f.Icon, icon)) f.Icon = icon;
+            };
 
             string? initialFile = null;
             if (args.Length > 0)
