@@ -72,3 +72,40 @@ jobs:
           files: |
             DepupOffice-${{ github.ref_name }}-win-x64.exe
             DepupOffice-${{ github.ref_name }}-win-x64.zip
+
+  mac:
+    name: Depup Office Mac (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build .app & .dmg
+        working-directory: mac
+        env:
+          DMG: '1'
+        run: ./build-mac-app.sh ${{ matrix.arch }}
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: DepupOffice-macos-${{ matrix.arch }}
+          path: mac/build/*.dmg
+
+      - name: GitHub Release (Mac)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mac/build/*.dmg
