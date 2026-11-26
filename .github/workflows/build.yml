@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tempelkan hasil build ke rilis yang sudah ada (mis. v4.4.3); kosongkan bila tidak'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -105,7 +110,8 @@ jobs:
           path: mac/build/*.dmg
 
       - name: GitHub Release (Mac)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: mac/build/*.dmg
