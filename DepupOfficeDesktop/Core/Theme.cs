@@ -127,37 +127,37 @@ namespace DepupOfficeDesktop.Core
         private static Color T(string light, string dark) => H(Dark ? dark : light);
 
         // ---------- Permukaan (Android: BG, SURFACE, SURFACE2, SURFACE3, SOFT, LINE) ----------
-        public static Color BG => T("#F6F7F9", "#191B20");
-        public static Color SIDEBAR => T("#E9EDF3", "#23262D");
-        public static Color TOOLBAR => T("#F2F4F8", "#21242B");
-        public static Color SURFACE => T("#FFFFFF", "#272A32");
+        public static Color BG => T("#F1F0EC", "#0F0F0E");          // Android C.BG
+        public static Color SIDEBAR => T("#FFFFFF", "#1B1B1A");     // Android: navigasi = SURFACE
+        public static Color TOOLBAR => T("#F1F0EC", "#0F0F0E");     // Android: bilah atas di atas halaman
+        public static Color SURFACE => T("#FFFFFF", "#1B1B1A");
         public static Color SURFACE_HI => SURFACE;
-        public static Color SURFACE2 => T("#E8ECF2", "#313540");
-        public static Color SURFACE3 => T("#DCE3EC", "#3C424F");
-        public static Color SOFT => T("#F1F4F8", "#2B2F38");
+        public static Color SURFACE2 => T("#E8E6E1", "#272725");
+        public static Color SURFACE3 => T("#DCD9D3", "#34342F");
+        public static Color SOFT => T("#F3F2EE", "#242422");
         public static Color FIELD => SURFACE;
-        public static Color LINE => T("#D8DEE8", "#373D48");
-        public static Color LINE_STRONG => T("#758298", "#8490A2");
+        public static Color LINE => T("#E4E2DD", "#2C2C29");
+        public static Color LINE_STRONG => T("#84817B", "#6F6D68");
         /// <summary>Kanvas di sekeliling halaman dokumen (Android: TRACK/CANVAS = SURFACE3).</summary>
-        public static Color CANVAS => T("#E4E8EE", "#1A1D24");
+        public static Color CANVAS => T("#DCD9D3", "#34342F");
 
         // ---------- Aksen biru royal (Android BLUE_ACCENT / PRIMARY) ----------
-        public static Color ACCENT => T("#0066C6", "#1670CE");
-        public static Color ACCENT_DARK => T("#0757AA", "#125FAB");
-        public static Color ACCENT_LIGHT => T("#075AAC", "#82BBFF");
+        public static Color ACCENT => T("#1652F6", "#1D56FF");      // Android BLUE_ACCENT
+        public static Color ACCENT_DARK => T("#0F43D6", "#1647E0");
+        public static Color ACCENT_LIGHT => T("#1652F6", "#1D56FF"); // Android ON_PRIMARY_C
         public static Color BRAND => H("#0037FF");                     // ubin logo (sama dengan ikon aplikasi)
         public static Color VIOLET => T("#72539E", "#C2A9E6");
-        public static Color BLUE_BG => T("#E1EFFD", "#233A57");
-        public static Color BLUE_LINE => T("#BCD5F3", "#365677");
+        public static Color BLUE_BG => T("#E8EEFF", "#19254D");      // Android PRIMARY_C
+        public static Color BLUE_LINE => T("#E8EEFF", "#19254D");
         public static Color CYAN => ACCENT;
 
         // ---------- Tinta: aksi utama & panel kontras (Android INK / ON_INK) ----------
-        public static Color INK => T("#1C2430", "#F1F4FA");
-        public static Color ON_INK => T("#FFFFFF", "#1C2430");
+        public static Color INK => T("#111111", "#F2F1EE");
+        public static Color ON_INK => T("#FFFFFF", "#111111");
 
         // ---------- Teks ----------
-        public static Color TEXT => T("#202736", "#F0F3F8");
-        public static Color MUTED => T("#556175", "#ABB6C6");
+        public static Color TEXT => T("#111111", "#F2F1EE");
+        public static Color MUTED => T("#65625D", "#9C9A95");
         public static Color FAINT => LINE_STRONG;
 
         // ---------- Jenis berkas & status (Android PDF_FG/BG, DOC, XLS, IMG, SUCCESS, WARN, ERROR) ----------
@@ -275,18 +275,45 @@ namespace DepupOfficeDesktop.Core
 
         public static GraphicsPath RoundedRect(Rectangle bounds, int radius)
         {
-            int d = radius * 2;
             var path = new GraphicsPath();
             if (radius <= 0 || bounds.Width <= 0 || bounds.Height <= 0)
             {
                 path.AddRectangle(bounds);
                 return path;
             }
-            d = Math.Min(d, Math.Min(bounds.Width, bounds.Height));
-            path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
-            path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
-            path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
-            path.AddArc(bounds.X, bounds.Bottom - d, d, d, 90, 90);
+            const float k = 1.52866f;
+            float l = bounds.Left, t = bounds.Top, r = bounds.Right, b = bounds.Bottom;
+            if (radius * k * 2f > Math.Min(bounds.Width, bounds.Height))
+            {
+                // bentuk pil / radius terlalu besar: busur biasa (sama dengan Android addContinuousRect)
+                int d = Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height));
+                path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
+                path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
+                path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+                path.AddArc(bounds.X, bounds.Bottom - d, d, d, 90, 90);
+                path.CloseFigure();
+                return path;
+            }
+            // Sudut KONTINU ala iOS/Android DepUp (Ui.kt addContinuousRect): lengkung mulai lebih awal dan menyatu halus
+            float rad = radius;
+            PointF last = default;
+            bool first = true;
+            void Corner(float ox, float oy, float ix, float iy, float jx, float jy)
+            {
+                PointF P(float a, float c) => new(ox - a * rad * ix + c * rad * jx, oy - a * rad * iy + c * rad * jy);
+                var start = P(k, 0);
+                if (!first) path.AddLine(last, start);
+                first = false;
+                path.AddBezier(start, P(1.08849f, 0), P(0.86840f, 0), P(0.66993f, 0.06549f));
+                path.AddLine(P(0.66993f, 0.06549f), P(0.63149f, 0.07491f));
+                path.AddBezier(P(0.63149f, 0.07491f), P(0.37282f, 0.16906f), P(0.16906f, 0.37282f), P(0.07491f, 0.63149f));
+                path.AddLine(P(0.07491f, 0.63149f), P(0.06549f, 0.66993f));
+                path.AddBezier(P(0.06549f, 0.66993f), P(0, 0.86840f), P(0, 1.08849f), last = P(0, k));
+            }
+            Corner(r, t, 1, 0, 0, 1);     // kanan atas
+            Corner(r, b, 0, 1, -1, 0);    // kanan bawah
+            Corner(l, b, -1, 0, 0, -1);   // kiri bawah
+            Corner(l, t, 0, -1, 1, 0);    // kiri atas
             path.CloseFigure();
             return path;
         }
@@ -470,8 +497,26 @@ namespace DepupOfficeDesktop.Core
         }
 
         /// <summary>Bilah judul gelap (Windows 10 20H1+) dan warna keterangan navy (Windows 11).</summary>
+        private static Icon? _appIcon;
+        /// <summary>Ikon aplikasi = logo Android (ic_logo_tile), dari Assets/depup.ico yang tertanam.</summary>
+        public static Icon? AppIcon
+        {
+            get
+            {
+                if (_appIcon != null) return _appIcon;
+                try
+                {
+                    using var s = typeof(Theme).Assembly.GetManifestResourceStream("DepupOfficeDesktop.depup.ico");
+                    if (s != null) _appIcon = new Icon(s);
+                }
+                catch { }
+                return _appIcon;
+            }
+        }
+
         public static void ApplyWindowChrome(Form form)
         {
+            if (form.ShowIcon && AppIcon is { } ic && form.Icon?.Handle != ic.Handle) form.Icon = ic;
             void Apply()
             {
                 try

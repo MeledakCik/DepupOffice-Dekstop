@@ -101,7 +101,7 @@ namespace DepupOfficeDesktop.Forms
             var fill = NoteColors.Fill(_n.Color);
             if (_hover) fill = Theme.Dark ? ControlPaint.Light(fill, 0.08f) : ControlPaint.Dark(fill, 0.02f);
             var r = new Rectangle(0, 0, Width - 1, Height - 1);
-            using (var path = Theme.RoundedRect(r, S(18)))
+            using (var path = Theme.RoundedRect(r, S(20)))   // Android noteCard: squircle 20
             {
                 using var b = new SolidBrush(fill);
                 g.FillPath(b, path);
@@ -153,26 +153,16 @@ namespace DepupOfficeDesktop.Forms
             int fx = x;
             if (_n.Pinned)
             {
-                TextRenderer.DrawText(g, "📌", MetaFont, new Point(fx, fy), mu);
-                fx += TextRenderer.MeasureText("📌", MetaFont).Width;
+                int ps = S(13);
+                DepupIcons.Draw(g, "pin", new RectangleF(fx, fy + (metaH - ps) / 2f, ps, ps), mu);
+                fx += ps + S(5);
             }
             TextRenderer.DrawText(g, AppStorage.RelTime(_n.Updated), MetaFont, new Rectangle(fx, fy, x + inner - fx, metaH), mu, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 
-        internal static void DrawBox(Graphics g, Rectangle r, bool on, Color c)
-        {
-            using var path = Theme.RoundedRect(r, Math.Max(2, r.Width / 4));
-            using var pen = new Pen(c, Math.Max(1.4f, r.Width / 9f));
-            g.DrawPath(pen, path);
-            if (!on) return;
-            using var p2 = new Pen(c, Math.Max(1.6f, r.Width / 8f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
-            g.DrawLines(p2, new[]
-            {
-                new PointF(r.Left + r.Width * 0.24f, r.Top + r.Height * 0.52f),
-                new PointF(r.Left + r.Width * 0.43f, r.Top + r.Height * 0.72f),
-                new PointF(r.Left + r.Width * 0.78f, r.Top + r.Height * 0.30f),
-            });
-        }
+        /// <summary>Kotak centang Android (ic_checkbox / ic_checkbox_on).</summary>
+        internal static void DrawBox(Graphics g, Rectangle r, bool on, Color c) =>
+            DepupIcons.Draw(g, on ? "checkbox_on" : "checkbox", Rectangle.Inflate(r, Math.Max(1, r.Width / 6), Math.Max(1, r.Width / 6)), c);
     }
 
     /// <summary>Operasi catatan bersama (menu opsi, bagikan, hapus) untuk layar Catatan, Beranda, dan editor.</summary>
@@ -435,7 +425,7 @@ namespace DepupOfficeDesktop.Forms
         private Control EmptyCard(int w)
         {
             var card = new CardPanel { Width = w, Height = S(220), CornerRadius = 22, Location = new Point(0, S(16)) };
-            card.Controls.Add(new IconChip { Size = new Size(S(52), S(52)), Radius = S(26), Bg = Theme.AMBER_BG, Fg = Theme.AMBER, Icon = CardIcon.Edit, Location = new Point((w - S(52)) / 2, S(22)) });
+            card.Controls.Add(new IconChip { Size = new Size(S(52), S(52)), Radius = S(26), Bg = Theme.AMBER_BG, Fg = Theme.AMBER, Icon = CardIcon.Note, Location = new Point((w - S(52)) / 2, S(22)) });
             var t = new Label { Text = "Belum ada catatan", Font = Theme.FontHead(12f), ForeColor = Theme.TEXT, AutoSize = false, TextAlign = ContentAlignment.MiddleCenter, Bounds = new Rectangle(S(20), S(84), w - S(40), S(26)), UseMnemonic = false };
             var d = new Label { Text = "Tulis ide, daftar belanja, atau tugas. Semua tersimpan offline di komputer ini.", Font = Theme.FontBody(9.5f), ForeColor = Theme.MUTED, AutoSize = false, TextAlign = ContentAlignment.TopCenter, Bounds = new Rectangle(S(30), S(112), w - S(60), S(40)), UseMnemonic = false };
             var b = Theme.CreateButton("Tulis catatan", true, Theme.ACCENT, S(38), S(150));

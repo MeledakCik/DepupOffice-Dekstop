@@ -12,7 +12,9 @@ namespace DepupOfficeDesktop.Controls
         Pdf, Word, Excel, Folder, Speaker, Printer, Qr, Merge, Split, Organize,
         Image, ImagePdf, Compress, Scan, Batch, Lock, Signature, Sliders, Theme,
         Vault, Letter, Person, Receipt, Calendar, Edit, Camera,
-        Upload, Download, Share, Heart, Mail, Shield, Search, Chat, Wand, Check, Grid
+        Upload, Download, Share, Heart, Mail, Shield, Search, Chat, Wand, Check, Grid,
+        // ikon Android tambahan (nama sama dengan res/drawable/ic_*.xml)
+        Note, Checklist, Crop, Cut, Bright, Widget, ZoomIn, Clock, Star, Pin, Home, Tools, Box, Bulb, Palette, Verified, Spark, Cloud, Offline, Plus
     }
 
     /// <summary>
@@ -52,7 +54,7 @@ namespace DepupOfficeDesktop.Controls
             using (var b = new SolidBrush(_bg))
                 g.FillPath(b, path);
 
-            float side = Math.Min(Width, Height) * 0.56f;
+            float side = Math.Min(Width, Height) * 0.5f;   // Android iconBadge: ikon 24 dp di wadah 48 dp
             var box = new RectangleF((Width - side) / 2f, (Height - side) / 2f, side, side);
             CardIconPainter.Draw(g, box, _icon, _fg, _bg);
         }
@@ -61,275 +63,28 @@ namespace DepupOfficeDesktop.Controls
     public static class CardIconPainter
     {
         /// <summary>Menggambar ikon pada kotak <paramref name="box"/> (ruang desain 24x24).</summary>
-        public static void Draw(Graphics g, RectangleF box, CardIcon icon, Color fg, Color bg)
+        /// <summary>Nama ikon Android (res/drawable/ic_NAMA.xml) untuk tiap <see cref="CardIcon"/>.</summary>
+        public static string AndroidName(CardIcon icon) => icon switch
         {
-            float u = box.Width / 24f;
-            float x0 = box.X, y0 = box.Y;
-            PointF P(float x, float y) => new(x0 + x * u, y0 + y * u);
-            RectangleF R(float x, float y, float w, float h) => new(x0 + x * u, y0 + y * u, w * u, h * u);
+            CardIcon.Pdf => "pdf", CardIcon.Word => "doc", CardIcon.Excel => "sheet", CardIcon.Folder => "folder",
+            CardIcon.Speaker => "volume", CardIcon.Printer => "print", CardIcon.Qr => "qr", CardIcon.Merge => "merge",
+            CardIcon.Split => "cut", CardIcon.Organize => "crop", CardIcon.Image => "image", CardIcon.ImagePdf => "img_add",
+            CardIcon.Compress => "compress", CardIcon.Scan => "scan", CardIcon.Batch => "grid", CardIcon.Lock => "lock",
+            CardIcon.Signature => "sign", CardIcon.Sliders => "tune", CardIcon.Theme => "moon_sun", CardIcon.Vault => "lock",
+            CardIcon.Letter => "doc", CardIcon.Person => "user", CardIcon.Receipt => "sheet", CardIcon.Calendar => "clock",
+            CardIcon.Edit => "edit", CardIcon.Camera => "camera", CardIcon.Upload => "upload", CardIcon.Download => "download",
+            CardIcon.Share => "share", CardIcon.Heart => "heart", CardIcon.Mail => "mail", CardIcon.Shield => "shield",
+            CardIcon.Search => "search", CardIcon.Chat => "chat", CardIcon.Wand => "wand", CardIcon.Check => "check_ok",
+            CardIcon.Grid => "grid", CardIcon.Note => "note", CardIcon.Checklist => "checklist", CardIcon.Crop => "crop",
+            CardIcon.Cut => "cut", CardIcon.Bright => "bright", CardIcon.Widget => "widget", CardIcon.ZoomIn => "zoom_in",
+            CardIcon.Clock => "clock", CardIcon.Star => "star", CardIcon.Pin => "pin", CardIcon.Home => "home",
+            CardIcon.Tools => "tools", CardIcon.Box => "box", CardIcon.Bulb => "bulb", CardIcon.Palette => "palette",
+            CardIcon.Verified => "verified", CardIcon.Spark => "spark", CardIcon.Cloud => "cloud", CardIcon.Offline => "offline", CardIcon.Plus => "plus",
+            _ => "doc"
+        };
 
-            using var pen = new Pen(fg, Math.Max(1.3f, 1.8f * u))
-            {
-                StartCap = LineCap.Round,
-                EndCap = LineCap.Round,
-                LineJoin = LineJoin.Round
-            };
-            using var fill = new SolidBrush(fg);
-            using var bgFill = new SolidBrush(bg);
-
-            void Line(float ax, float ay, float bx, float by) => g.DrawLine(pen, P(ax, ay), P(bx, by));
-            void Poly(params float[] c)
-            {
-                var pts = new PointF[c.Length / 2];
-                for (int i = 0; i < pts.Length; i++) pts[i] = P(c[i * 2], c[i * 2 + 1]);
-                g.DrawLines(pen, pts);
-            }
-            void Closed(params float[] c)
-            {
-                var pts = new PointF[c.Length / 2];
-                for (int i = 0; i < pts.Length; i++) pts[i] = P(c[i * 2], c[i * 2 + 1]);
-                g.DrawPolygon(pen, pts);
-            }
-            void Box(float x, float y, float w, float h, float rad = 2f)
-            {
-                using var p = Theme.RoundedRect(Rectangle.Round(R(x, y, w, h)), (int)Math.Round(rad * u));
-                g.DrawPath(pen, p);
-            }
-            void Dot(float cx, float cy, float rad)
-            {
-                var c = P(cx, cy);
-                g.FillEllipse(fill, c.X - rad * u, c.Y - rad * u, rad * 2 * u, rad * 2 * u);
-            }
-            void Page()
-            {
-                Closed(6, 3, 14, 3, 19, 8, 19, 21, 6, 21);
-                Poly(14, 3, 14, 8, 19, 8);
-            }
-
-            switch (icon)
-            {
-                case CardIcon.Pdf:
-                    Page();
-                    Line(9, 12, 16, 12);
-                    Line(9, 15, 16, 15);
-                    Line(9, 18, 13, 18);
-                    break;
-                case CardIcon.Word:
-                    Page();
-                    Poly(8.5f, 11, 10.2f, 18, 12.5f, 13, 14.8f, 18, 16.5f, 11);
-                    break;
-                case CardIcon.Excel:
-                    Page();
-                    Line(9, 12, 16, 19);
-                    Line(16, 12, 9, 19);
-                    break;
-                case CardIcon.Folder:
-                    Closed(3, 6.5f, 9, 6.5f, 11, 9, 21, 9, 21, 19, 3, 19);
-                    break;
-                case CardIcon.Speaker:
-                    Closed(4, 9.5f, 8, 9.5f, 13, 5.5f, 13, 18.5f, 8, 14.5f, 4, 14.5f);
-                    g.DrawArc(pen, R(11, 8, 7, 8), -55, 110);
-                    g.DrawArc(pen, R(10, 4.5f, 11, 15), -55, 110);
-                    break;
-                case CardIcon.Printer:
-                    Box(7, 3, 10, 5, 1);
-                    Box(3, 8, 18, 9, 2);
-                    Box(7, 14, 10, 7, 1);
-                    Dot(17.5f, 11, 0.9f);
-                    break;
-                case CardIcon.Qr:
-                    Box(3.5f, 3.5f, 7, 7, 1.5f);
-                    Box(13.5f, 3.5f, 7, 7, 1.5f);
-                    Box(3.5f, 13.5f, 7, 7, 1.5f);
-                    g.FillRectangle(fill, R(6, 6, 2, 2));
-                    g.FillRectangle(fill, R(16, 6, 2, 2));
-                    g.FillRectangle(fill, R(6, 16, 2, 2));
-                    Line(14, 15, 14, 15.2f);
-                    Line(17, 14, 20.5f, 14);
-                    Line(14, 18, 17, 18);
-                    Line(20.5f, 17, 20.5f, 20.5f);
-                    Line(17, 20.5f, 17.1f, 20.5f);
-                    break;
-                case CardIcon.Merge:
-                    Line(5, 4, 12, 11);
-                    Line(19, 4, 12, 11);
-                    Line(12, 11, 12, 20);
-                    Poly(8.5f, 16.5f, 12, 20, 15.5f, 16.5f);
-                    break;
-                case CardIcon.Split:
-                    Line(12, 4, 12, 11);
-                    Line(12, 11, 5, 19);
-                    Line(12, 11, 19, 19);
-                    Poly(5, 14.5f, 5, 19, 9.5f, 19);
-                    Poly(14.5f, 19, 19, 19, 19, 14.5f);
-                    break;
-                case CardIcon.Organize:
-                    Box(3.5f, 3.5f, 7, 7, 1.5f);
-                    Box(13.5f, 3.5f, 7, 7, 1.5f);
-                    Box(3.5f, 13.5f, 7, 7, 1.5f);
-                    Box(13.5f, 13.5f, 7, 7, 1.5f);
-                    break;
-                case CardIcon.Image:
-                    Box(3, 5, 18, 14, 2);
-                    Poly(3.5f, 16.5f, 9, 11, 13.5f, 15.5f, 16.5f, 12.5f, 20.5f, 16.5f);
-                    Dot(8, 9, 1.3f);
-                    break;
-                case CardIcon.ImagePdf:
-                    Page();
-                    Poly(8.5f, 18, 11.5f, 14, 13.5f, 16.5f, 15, 15, 17, 18);
-                    Dot(10.5f, 11, 1f);
-                    break;
-                case CardIcon.Compress:
-                    Line(12, 3, 12, 9.5f);
-                    Poly(8.8f, 6.3f, 12, 9.5f, 15.2f, 6.3f);
-                    Line(12, 21, 12, 14.5f);
-                    Poly(8.8f, 17.7f, 12, 14.5f, 15.2f, 17.7f);
-                    Line(4, 12, 20, 12);
-                    break;
-                case CardIcon.Scan:
-                    Poly(3, 8, 3, 3, 8, 3);
-                    Poly(16, 3, 21, 3, 21, 8);
-                    Poly(3, 16, 3, 21, 8, 21);
-                    Poly(16, 21, 21, 21, 21, 16);
-                    Line(6.5f, 12, 17.5f, 12);
-                    break;
-                case CardIcon.Batch:
-                    Box(8, 3, 13, 12, 2);
-                    Box(3, 8, 13, 12, 2);
-                    Poly(3.5f, 17, 7, 13.5f, 10, 16.5f, 12.5f, 14.5f, 15.5f, 17.5f);
-                    break;
-                case CardIcon.Lock:
-                    Box(5, 11, 14, 10, 2);
-                    g.DrawArc(pen, R(8, 3, 8, 16), 180, 180);
-                    Dot(12, 15.5f, 1.3f);
-                    Line(12, 16, 12, 18);
-                    break;
-                case CardIcon.Signature:
-                    Closed(4, 20, 5.2f, 15, 15.5f, 4.5f, 19.5f, 8.5f, 9, 19);
-                    Line(13.5f, 6.5f, 17.5f, 10.5f);
-                    break;
-                case CardIcon.Sliders:
-                    Line(4, 6, 20, 6);
-                    Line(4, 12, 20, 12);
-                    Line(4, 18, 20, 18);
-                    foreach (var (cx, cy) in new[] { (8.5f, 6f), (15.5f, 12f), (9.5f, 18f) })
-                    {
-                        var c = P(cx, cy);
-                        g.FillEllipse(bgFill, c.X - 2.4f * u, c.Y - 2.4f * u, 4.8f * u, 4.8f * u);
-                        g.DrawEllipse(pen, c.X - 2.4f * u, c.Y - 2.4f * u, 4.8f * u, 4.8f * u);
-                    }
-                    break;
-                case CardIcon.Theme:
-                    g.DrawEllipse(pen, R(4, 4, 16, 16));
-                    g.FillPie(fill, R(4, 4, 16, 16), 90, 180);
-                    break;
-                case CardIcon.Vault:
-                    Box(3.5f, 4, 17, 14, 2);
-                    g.DrawEllipse(pen, R(8.5f, 8, 7, 7));
-                    Dot(12, 11.5f, 1f);
-                    Line(7, 18, 7, 21);
-                    Line(17, 18, 17, 21);
-                    break;
-                case CardIcon.Letter:
-                    Box(3, 6, 18, 13, 2);
-                    Poly(3.5f, 7, 12, 13.5f, 20.5f, 7);
-                    break;
-                case CardIcon.Person:
-                    g.DrawEllipse(pen, R(8, 3.5f, 8, 8));
-                    g.DrawArc(pen, R(4.5f, 14, 15, 14), 180, 180);
-                    break;
-                case CardIcon.Receipt:
-                    Closed(6, 3, 18, 3, 18, 21, 15, 19, 12, 21, 9, 19, 6, 21);
-                    Line(9, 8, 15, 8);
-                    Line(9, 12, 15, 12);
-                    break;
-                case CardIcon.Calendar:
-                    Box(4, 5, 16, 15, 2);
-                    Line(4, 10, 20, 10);
-                    Line(8.5f, 3, 8.5f, 7);
-                    Line(15.5f, 3, 15.5f, 7);
-                    Dot(9, 14, 0.9f);
-                    Dot(12, 14, 0.9f);
-                    Dot(15, 14, 0.9f);
-                    Dot(9, 17.2f, 0.9f);
-                    Dot(12, 17.2f, 0.9f);
-                    break;
-                case CardIcon.Edit:
-                    Line(4, 20.5f, 20, 20.5f);
-                    Closed(6, 17, 7, 12.5f, 16, 3.5f, 19.5f, 7, 10.5f, 16);
-                    break;
-                case CardIcon.Upload:
-                    Line(12, 15, 12, 4);
-                    Poly(7.5f, 8.5f, 12, 4, 16.5f, 8.5f);
-                    Poly(4, 15, 4, 20, 20, 20, 20, 15);
-                    break;
-                case CardIcon.Download:
-                    Line(12, 4, 12, 15);
-                    Poly(7.5f, 10.5f, 12, 15, 16.5f, 10.5f);
-                    Poly(4, 15, 4, 20, 20, 20, 20, 15);
-                    break;
-                case CardIcon.Share:
-                    g.DrawEllipse(pen, R(15, 3, 5, 5));
-                    g.DrawEllipse(pen, R(4, 9.5f, 5, 5));
-                    g.DrawEllipse(pen, R(15, 16, 5, 5));
-                    Line(8.6f, 10.8f, 15.4f, 6.7f);
-                    Line(8.6f, 13.2f, 15.4f, 17.3f);
-                    break;
-                case CardIcon.Heart:
-                    using (var hp = new System.Drawing.Drawing2D.GraphicsPath())
-                    {
-                        hp.AddBezier(P(12, 20), P(9, 17.5f), P(3, 13.5f), P(3, 8.5f));
-                        hp.AddBezier(P(3, 8.5f), P(3, 5), P(5.5f, 3.5f), P(7.8f, 3.5f));
-                        hp.AddBezier(P(7.8f, 3.5f), P(9.8f, 3.5f), P(11.2f, 4.7f), P(12, 6.3f));
-                        hp.AddBezier(P(12, 6.3f), P(12.8f, 4.7f), P(14.2f, 3.5f), P(16.2f, 3.5f));
-                        hp.AddBezier(P(16.2f, 3.5f), P(18.5f, 3.5f), P(21, 5), P(21, 8.5f));
-                        hp.AddBezier(P(21, 8.5f), P(21, 13.5f), P(15, 17.5f), P(12, 20));
-                        g.DrawPath(pen, hp);
-                    }
-                    break;
-                case CardIcon.Mail:
-                    Box(3, 5.5f, 18, 13, 2);
-                    Poly(3.5f, 6.5f, 12, 13, 20.5f, 6.5f);
-                    break;
-                case CardIcon.Shield:
-                    Closed(12, 3, 19.5f, 6, 19, 13, 12, 21, 5, 13, 4.5f, 6);
-                    Poly(8.5f, 12, 11, 14.5f, 15.5f, 9.5f);
-                    break;
-                case CardIcon.Search:
-                    g.DrawEllipse(pen, R(4, 4, 12, 12));
-                    Line(14.5f, 14.5f, 20, 20);
-                    break;
-                case CardIcon.Chat:
-                    Closed(4, 5, 20, 5, 20, 16, 10, 16, 6, 20, 6, 16, 4, 16);
-                    Line(8, 9.5f, 16, 9.5f);
-                    Line(8, 12.5f, 13, 12.5f);
-                    break;
-                case CardIcon.Wand:
-                    Line(4, 20, 15, 9);
-                    Line(13.5f, 7.5f, 16.5f, 10.5f);
-                    Line(18, 3, 18, 6);
-                    Line(16.5f, 4.5f, 19.5f, 4.5f);
-                    Line(9, 4, 9, 6);
-                    Line(8, 5, 10, 5);
-                    Line(20, 11, 20, 13);
-                    Line(19, 12, 21, 12);
-                    break;
-                case CardIcon.Check:
-                    g.DrawEllipse(pen, R(3, 3, 18, 18));
-                    Poly(8, 12.5f, 11, 15.5f, 16.5f, 9);
-                    break;
-                case CardIcon.Grid:
-                    Box(4, 4, 7, 7, 2);
-                    Box(13, 4, 7, 7, 2);
-                    Box(4, 13, 7, 7, 2);
-                    Box(13, 13, 7, 7, 2);
-                    break;
-                case CardIcon.Camera:
-                    Box(3, 7, 18, 13, 2.5f);
-                    Poly(8, 7, 9.5f, 4, 14.5f, 4, 16, 7);
-                    g.DrawEllipse(pen, R(8.5f, 10.5f, 7, 7));
-                    break;
-            }
-        }
+        /// <summary>Menggambar ikon pada kotak <paramref name="box"/> — vektor Android "Depup Solid" yang sama persis.</summary>
+        public static void Draw(Graphics g, RectangleF box, CardIcon icon, Color fg, Color bg) =>
+            DepupIcons.Draw(g, AndroidName(icon), box, fg);
     }
 }
