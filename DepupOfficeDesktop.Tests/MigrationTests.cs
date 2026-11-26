@@ -41,24 +41,60 @@ public sealed class MigrationTests
     }
 
     [Fact]
-    public void ProtectedDocumentRoundTripAndTamperDetection()
+    public void ProtectedDocumentV3RoundTripAndTamperDetection()
     {
         var original = TinyPdf("Rahasia");
         var path = Path.Combine(Path.GetTempPath(), $"prot_{Guid.NewGuid():N}.pdf");
         try
         {
-            ProtectedDoc.Protect(original, "guru123", path);
+            ProtectedDoc.Protect(original, "7KQ2-M9XD-4RTW", "GuruRahasia!", path);
             var bytes = File.ReadAllBytes(path);
             Assert.True(ProtectedDoc.IsProtected(path));
             Assert.False(ProtectedDoc.IsProtected(original));
-            Assert.Equal(original, ProtectedDoc.Open(bytes));
-            Assert.True(ProtectedDoc.VerifyEditPassword(bytes, "guru123"));
-            Assert.False(ProtectedDoc.VerifyEditPassword(bytes, "salah"));
-            int i = Encoding.Latin1.GetString(bytes).IndexOf("DEPUP_SECURE_DOC_v1", StringComparison.Ordinal);
-            bytes[i + 200] ^= 1;
-            Assert.Throws<ProtectedDocException>(() => ProtectedDoc.Open(bytes));
+            Assert.Equal(3, ProtectedDoc.InfoOf(bytes).Version);
+            Assert.Equal(original, ProtectedDoc.Open(bytes, " 7kq2 m9xd-4rtw "));
+            var missing = Assert.Throws<SecurePackage.AccessCodeException>(() => ProtectedDoc.Open(bytes));
+            Assert.True(missing.Missing);
+            var wrong = Assert.Throws<SecurePackage.AccessCodeException>(() => ProtectedDoc.Open(bytes, "AAAA-BBBB-CCCC"));
+            Assert.False(wrong.Missing);
+            Assert.True(ProtectedDoc.VerifyEditPassword(bytes, "GuruRahasia!", "7KQ2M9XD4RTW"));
+            Assert.False(ProtectedDoc.VerifyEditPassword(bytes, "gururahasia!", "7KQ2M9XD4RTW"));
+            Assert.False(ProtectedDoc.VerifyEditPassword(bytes, "GuruRahasia!", "AAAA-BBBB-CCCC"));
         }
         finally { File.Delete(path); }
+    }
+
+    private static string Sha(byte[] b) => Convert.ToHexString(SHA256.HashData(b)).ToLowerInvariant();
+
+    /// <summary>Vektor referensi lintas platform dari SecurePackageTest.kt (Android) — juga diverifikasi iOS &amp; Python.</summary>
+    [Fact]
+    public void V3MatchesCrossPlatformReferenceVector()
+    {
+        var plain = Encoding.ASCII.GetBytes("%PDF-1.4 contoh isi rahasia");
+        var salt = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray();
+        var nonce = Enumerable.Range(0, 12).Select(i => (byte)(100 + i)).ToArray();
+        var pkg = SecurePackage.BuildV3(plain, "7kq2 m9xd-4rtw", "GuruRahasia!", "0f8fad5b-d9cb-469f-a165-70867728950e", 100_000, salt, nonce);
+        Assert.Equal(315, pkg.Length);
+        Assert.Equal("d3fd862f041dfa5d7473a70de3c59e5c87c9783a424f6e4c103f22ca41fda843", Sha(pkg));
+        var (body, tag) = SecurePackage.Split(pkg);
+        Assert.Equal(plain, SecurePackage.OpenV3(body, tag, SecurePackage.ParseMeta(body), "7KQ2M9XD4RTW"));
+        for (int at = 0; at < pkg.Length; at += 7)
+        {
+            var t = (byte[])pkg.Clone(); t[at] ^= 1;
+            Assert.ThrowsAny<Exception>(() => { var (b2, t2) = SecurePackage.Split(t); SecurePackage.OpenV3(b2, t2, SecurePackage.ParseMeta(b2), "7KQ2M9XD4RTW"); });
+        }
+    }
+
+    [Fact]
+    public void GeneratedAccessCodesAreReadable()
+    {
+        for (int i = 0; i < 50; i++)
+        {
+            var c = SecurePackage.GenerateAccessCode();
+            Assert.Matches("^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$", c);
+            Assert.Null(SecurePackage.ValidateNewCode(c));
+        }
+        Assert.NotNull(SecurePackage.ValidateNewCode("abc-12"));
     }
 
     [Fact]

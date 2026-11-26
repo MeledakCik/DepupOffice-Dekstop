@@ -18,6 +18,8 @@ namespace DepupOfficeDesktop.Forms
         public bool AllowPrint = true, AllowCopy = true;
         /// <summary>Ekspor PDF asli dengan password guru/pemilik (null = tombol disembunyikan).</summary>
         public Action<IWin32Window>? ExportOriginal;
+        /// <summary>Dokumen Terlindungi v3: hapus kode akses yang diingat di komputer ini.</summary>
+        public Action<IWin32Window>? ForgetAccessCode;
         public Func<string, bool, Task<bool>>? BookmarkChanged;
         public Func<string, Task<bool>>? Rename;
         public Action? OnClosed;
@@ -258,6 +260,8 @@ namespace DepupOfficeDesktop.Forms
                 btnVoice.Visible = _opt.AllowCopy;
                 if (_opt.ExportOriginal != null)
                     actions.Controls.Add(Act("🔑 Ekspor PDF Asli", false, Theme.RED, () => _opt.ExportOriginal(DlgOwner)));
+                if (_opt.ForgetAccessCode != null)
+                    actions.Controls.Add(Act("Lupakan kode akses", false, Theme.TEXT, () => _opt.ForgetAccessCode(DlgOwner)));
                 var secPill = new Label
                 {
                     Text = "🔒 Dokumen Terlindungi • tangkapan & rekam layar diblokir" + (_opt.AllowCopy ? "" : " • salin dinonaktifkan") + (_opt.AllowPrint ? "" : " • cetak dinonaktifkan"),
@@ -909,7 +913,7 @@ namespace DepupOfficeDesktop.Forms
             else if (_mime == AppStorage.MIME_DOCX)
                 PrintHelper.PrintText(DlgOwner, _fileName, OfficeReader.ReadDocxText(_filePath));
             else if (IsSpreadsheet && ReadSpreadsheet() is { } sheet)
-                PrintHelper.PrintSpreadsheet(DlgOwner, _fileName, sheet.Rows);
+                PrintHelper.PrintSpreadsheet(DlgOwner, _fileName, sheet.Rows, sheet.BoldRows);
             else if (_mime.StartsWith("image/"))
             {
                 using var bmp = PdfEngine.Decode(_filePath, 1800);

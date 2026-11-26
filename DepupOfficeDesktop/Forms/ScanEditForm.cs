@@ -17,7 +17,7 @@ public sealed class ScanEditForm : Form
     private Panel _cropTools = null!, _filterTools = null!;
     private Button _previous = null!, _next = null!, _moveUp = null!, _moveDown = null!, _remove = null!, _redact = null!;
     private int _index, _brightness, _contrast;
-    private int _mode = 3;
+    private int _mode = 0;   // bawaan Warna asli (Android 4.3)
     private bool _updatingPages, _arranging;
     private ScanPage Current => _pages[_index];
 

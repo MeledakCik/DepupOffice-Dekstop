@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Printing;
 using System.Windows.Forms;
+using DepupOfficeDesktop.Forms;
 
 namespace DepupOfficeDesktop.Core
 {
     /// <summary>
-    /// Porting dari PrintHelper.kt:
+    /// Semua jalur cetak lewat lembar Cetak DepUp (<see cref="PrintSheetForm"/>, port PrintSheet.kt):
     /// Cetak langsung PDF, gambar hasil scan/KTP 2 sisi, dokumen Word, dan tabel Spreadsheet Excel
     /// ke printer WiFi, USB, Bluetooth, atau Microsoft Print to PDF menggunakan PrintDocument asli Windows.
     /// </summary>
@@ -19,11 +20,8 @@ namespace DepupOfficeDesktop.Core
             {
                 if (!PdfEngine.EnsureUnlocked(owner, filePath)) return;
                 var (_, document) = Task.Run(() => PagedDocument.Open(filePath)).GetAwaiter().GetResult();
-                using (document)
-                {
-                    if (document == null) throw new InvalidDataException("PDF tidak dapat dibaca.");
-                    PrintDocumentPages(owner, document, documentName);
-                }
+                if (document == null) throw new InvalidDataException("PDF tidak dapat dibaca.");
+                PrintSheetForm.Show(owner, new PagedPrintSource(document, own: true), documentName);
             }
             catch (Exception ex)
             {
@@ -31,79 +29,17 @@ namespace DepupOfficeDesktop.Core
             }
         }
 
-        /// <summary>Cetak halaman yang sudah dirender (mis. slide PPTX). Bitmap TIDAK dibuang di sini.</summary>
+        /// <summary>Cetak halaman yang sudah dirender (mis. slide PPTX, hasil pindai). Bitmap TIDAK dibuang di sini.</summary>
         public static void PrintPages(Form owner, IReadOnlyList<Bitmap> pages, string documentName)
-            => PrintPages(owner, pages.Count, index => pages[index], documentName, disposePages: false);
+            => PrintSheetForm.Show(owner, new BitmapPrintSource(pages), documentName);
 
+        /// <summary>Lembar Cetak DepUp untuk dokumen yang sedang dibuka di Reader (dokumen tidak dibuang).</summary>
         internal static void PrintDocumentPages(Form owner, PagedDocument document, string documentName)
-            => PrintPages(owner, document.Count, index => Task.Run(() => document.Render(index, 1800)).GetAwaiter().GetResult(),
-                documentName, disposePages: true);
-
-        private static void PrintPages(Form owner, int count, Func<int, Bitmap> getPage, string documentName, bool disposePages)
-        {
-            if (count == 0)
-            {
-                Theme.Toast(owner, "Tidak ada halaman yang dapat dicetak");
-                return;
-            }
-            int pageIdx = 0;
-            int end = count;
-            using var pd = new PrintDocument { DocumentName = $"DepupOffice_{documentName}" };
-            pd.PrinterSettings.MinimumPage = pd.PrinterSettings.FromPage = 1;
-            pd.PrinterSettings.MaximumPage = pd.PrinterSettings.ToPage = count;
-            pd.BeginPrint += (s, e) =>
-            {
-                bool range = pd.PrinterSettings.PrintRange == PrintRange.SomePages;
-                pageIdx = range ? Math.Clamp(pd.PrinterSettings.FromPage - 1, 0, count - 1) : 0;
-                end = range ? Math.Clamp(pd.PrinterSettings.ToPage, pageIdx + 1, count) : count;
-            };
-            pd.PrintPage += (s, e) =>
-            {
-                if (e.Graphics != null && pageIdx < end)
-                {
-                    var bmp = getPage(pageIdx);
-                    using var owned = disposePages ? bmp : null;
-                    Rectangle bounds = e.MarginBounds;
-                    float scale = Math.Min((float)bounds.Width / bmp.Width, (float)bounds.Height / bmp.Height);
-                    int dw = (int)(bmp.Width * scale);
-                    int dh = (int)(bmp.Height * scale);
-                    int dx = bounds.Left + (bounds.Width - dw) / 2;
-                    int dy = bounds.Top + (bounds.Height - dh) / 2;
-                    e.Graphics.DrawImage(bmp, new Rectangle(dx, dy, dw, dh));
-                }
-                pageIdx++;
-                e.HasMorePages = pageIdx < end;
-            };
-
-            using var dlg = new PrintDialog { Document = pd, UseEXDialog = true, AllowSomePages = true };
-            if (dlg.ShowDialog(owner) == DialogResult.OK)
-                pd.Print();
-        }
+            => PrintSheetForm.Show(owner, new PagedPrintSource(document, own: false), documentName);
 
         public static void PrintBitmap(Form owner, Bitmap bitmap, string jobName)
         {
-            try
-            {
-                using var pd = new PrintDocument { DocumentName = jobName };
-                pd.PrintPage += (s, e) =>
-                {
-                    if (e.Graphics != null)
-                    {
-                        Rectangle bounds = e.MarginBounds;
-                        float scale = Math.Min((float)bounds.Width / bitmap.Width, (float)bounds.Height / bitmap.Height);
-                        int dw = (int)(bitmap.Width * scale);
-                        int dh = (int)(bitmap.Height * scale);
-                        int dx = bounds.Left + (bounds.Width - dw) / 2;
-                        int dy = bounds.Top + (bounds.Height - dh) / 2;
-                        e.Graphics.DrawImage(bitmap, new Rectangle(dx, dy, dw, dh));
-                    }
-                    e.HasMorePages = false;
-                };
-
-                using var dlg = new PrintDialog { Document = pd, UseEXDialog = true };
-                if (dlg.ShowDialog(owner) == DialogResult.OK)
-                    pd.Print();
-            }
+            try { PrintSheetForm.Show(owner, new BitmapPrintSource(new[] { bitmap }), jobName); }
             catch (Exception ex)
             {
                 MessageBox.Show(owner, $"Gagal mencetak gambar: {ex.Message}", "Cetak Gambar", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -112,94 +48,23 @@ namespace DepupOfficeDesktop.Core
 
         public static void PrintText(Form owner, string title, string text)
         {
-            try
-            {
-                string[] lines = text.Replace("\r\n", "\n").Split('\n');
-                int lineIdx = 0;
-                using var pd = new PrintDocument { DocumentName = $"DepupOffice_{title}" };
-                pd.PrintPage += (s, e) =>
-                {
-                    if (e.Graphics == null) { e.HasMorePages = false; return; }
-                    using var titleFont = new Font("Segoe UI", 16f, FontStyle.Bold);
-                    using var bodyFont = new Font("Segoe UI", 11f, FontStyle.Regular);
-                    float y = e.MarginBounds.Top;
-                    float left = e.MarginBounds.Left;
-                    float maxW = e.MarginBounds.Width;
-
-                    if (lineIdx == 0)
-                    {
-                        e.Graphics.DrawString(title, titleFont, Brushes.Black, left, y);
-                        y += 40f;
-                    }
-
-                    while (lineIdx < lines.Length && y + 24f <= e.MarginBounds.Bottom)
-                    {
-                        var rect = new RectangleF(left, y, maxW, e.MarginBounds.Bottom - y);
-                        SizeF sz = e.Graphics.MeasureString(lines[lineIdx], bodyFont, (int)maxW);
-                        e.Graphics.DrawString(lines[lineIdx], bodyFont, Brushes.DarkSlateGray, rect);
-                        y += Math.Max(20f, sz.Height + 4f);
-                        lineIdx++;
-                    }
-                    e.HasMorePages = lineIdx < lines.Length;
-                };
-
-                using var dlg = new PrintDialog { Document = pd, UseEXDialog = true };
-                if (dlg.ShowDialog(owner) == DialogResult.OK)
-                    pd.Print();
-            }
+            try { PrintSheetForm.Show(owner, new TextPrintSource(title, text), title); }
             catch (Exception ex)
             {
                 MessageBox.Show(owner, $"Gagal mencetak dokumen: {ex.Message}", "Cetak Dokumen", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        public static void PrintSpreadsheet(Form owner, string title, IReadOnlyList<IReadOnlyList<string>> grid)
+        /// <summary>
+        /// Cetak lembar kerja UTUH (port SheetPrint.kt Android 4.3): semua baris &amp; kolom berisi, nilai rumus, lebar kolom
+        /// mengikuti isi, dipecah per halaman dengan judul kolom diulang. <paramref name="boldRows"/> = baris tebal (judul kolom).
+        /// </summary>
+        public static void PrintSpreadsheet(Form owner, string title, IReadOnlyList<IReadOnlyList<string>> grid, ISet<int>? boldRows = null)
         {
             try
             {
-                using var pd = new PrintDocument { DocumentName = $"DepupOffice_{title}" };
-                pd.PrintPage += (s, e) =>
-                {
-                    if (e.Graphics == null) return;
-                    using var titleFont = new Font("Segoe UI", 15f, FontStyle.Bold);
-                    using var cellFont = new Font("Segoe UI", 9.5f, FontStyle.Regular);
-                    using var boldFont = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-                    using var linePen = new Pen(Color.LightGray, 1f);
-
-                    float left = e.MarginBounds.Left;
-                    float startY = e.MarginBounds.Top;
-                    e.Graphics.DrawString(title, titleFont, Brushes.Black, left, startY);
-                    startY += 36f;
-
-                    int maxCols = grid.Count > 0 ? Math.Min(8, grid[0].Count) : 4;
-                    float cellW = Math.Max(80f, (float)e.MarginBounds.Width / Math.Max(1, maxCols));
-                    float cellH = 26f;
-
-                    int maxRows = Math.Min(grid.Count, 32);
-                    for (int r = 0; r < maxRows; r++)
-                    {
-                        var row = grid[r];
-                        for (int c = 0; c < Math.Min(row.Count, maxCols); c++)
-                        {
-                            float cx = left + c * cellW;
-                            float cy = startY + r * cellH;
-                            if (r == 0)
-                            {
-                                using var hb = new SolidBrush(Theme.PAPER_SOFT);
-                                e.Graphics.FillRectangle(hb, cx, cy, cellW, cellH);
-                            }
-                            e.Graphics.DrawRectangle(linePen, cx, cy, cellW, cellH);
-                            string val = row[c] ?? "";
-                            if (val.Length > 18) val = val.Substring(0, 16) + "..";
-                            e.Graphics.DrawString(val, r == 0 ? boldFont : cellFont, Brushes.Black, cx + 6f, cy + 5f);
-                        }
-                    }
-                    e.HasMorePages = false;
-                };
-
-                using var dlg = new PrintDialog { Document = pd, UseEXDialog = true };
-                if (dlg.ShowDialog(owner) == DialogResult.OK)
-                    pd.Print();
+                var doc = new SheetLayout.Doc(title, new[] { SheetLayout.FromRows(title, grid, boldRows) });
+                PrintSheetForm.Show(owner, new SheetPrintSource(doc), title);
             }
             catch (Exception ex)
             {
