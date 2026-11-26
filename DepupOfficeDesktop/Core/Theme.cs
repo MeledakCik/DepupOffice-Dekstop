@@ -13,7 +13,7 @@ namespace DepupOfficeDesktop.Core
     /// </summary>
     public static class Theme
     {
-        public const string AppVersion = "4.4.2";
+        public const string AppVersion = "4.4.3";
         public const string AppName = "Depup Office Desktop";
 
         /// <summary>Faktor skala total = DPI layar × zoom tampilan (1.0 = 96 DPI, zoom 100%).</summary>
