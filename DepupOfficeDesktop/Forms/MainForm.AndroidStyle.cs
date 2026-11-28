@@ -91,6 +91,12 @@ namespace DepupOfficeDesktop.Forms
             ["Watermark PDF"] = (CardIcon.Wand, Tone.Pdf),
             ["Watermark foto massal"] = (CardIcon.Wand, Tone.Img),
             ["Pilih berkas dulu"] = (CardIcon.Upload, Tone.Primary),
+            // presentasi (desktop; warna lencana PPTX = amber)
+            ["Presentasi"] = (CardIcon.ImagePdf, Tone.Amber),
+            ["Presentasi PowerPoint"] = (CardIcon.ImagePdf, Tone.Amber),
+            ["Presentasi Tugas"] = (CardIcon.ImagePdf, Tone.Amber),
+            ["Proposal Usaha"] = (CardIcon.ImagePdf, Tone.Amber),
+            ["Edit PPTX"] = (CardIcon.Edit, Tone.Amber),
         };
 
         /// <summary>Ikon &amp; warna Android untuk judul fitur; null bila judul tidak dikenal (gaya pemanggil dipakai).</summary>

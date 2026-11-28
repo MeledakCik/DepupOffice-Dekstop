@@ -241,6 +241,8 @@ namespace DepupOfficeDesktop.Forms
             btnEdit.Visible = _isPdf;
             var btnShow = Act("▶ Slideshow", false, Theme.INDIGO, StartSlideshow);
             btnShow.Visible = _isPdf || _isPptx;
+            var btnEditSlides = Act("✏️ Edit Presentasi", true, Theme.ACCENT, EditThisPresentation);
+            btnEditSlides.Visible = _isPptx && !_opt.Secure;
             var btnSlidesPdf = Act("Ekspor PDF…", false, Theme.RED, ExportSlidesToPdf);
             btnSlidesPdf.Visible = _isPptx && !_opt.Secure;
             Button? btnMore = null;
@@ -248,10 +250,10 @@ namespace DepupOfficeDesktop.Forms
             btnMore.Visible = !_isPptx;
             if (_isPdf || _isPptx)
             {
-                _pageActions.AddRange(new[] { btnVoice, btnPrint, btnShow, btnEdit, btnSign, btnMore, btnSlidesPdf });
+                _pageActions.AddRange(new[] { btnVoice, btnPrint, btnShow, btnEdit, btnEditSlides, btnSign, btnMore, btnSlidesPdf });
                 foreach (var button in _pageActions) button.Enabled = false;
             }
-            actions.Controls.AddRange(new Control[] { _btnTheme, _btnBookmark, btnVoice, btnPrint, btnShow, btnEdit, btnSign, btnSlidesPdf, btnMore });
+            actions.Controls.AddRange(new Control[] { _btnTheme, _btnBookmark, btnVoice, btnPrint, btnShow, btnEdit, btnEditSlides, btnSign, btnSlidesPdf, btnMore });
             if (_opt.Secure)
             {
                 // Dokumen Terlindungi: tanpa sunting/tanda tangan/ekspor; cetak & baca-lantang mengikuti izin dokumen.
@@ -924,6 +926,28 @@ namespace DepupOfficeDesktop.Forms
                 string txt = File.Exists(_filePath) ? File.ReadAllText(_filePath) : _fileName;
                 PrintHelper.PrintText(DlgOwner, _fileName, txt);
             }
+        }
+
+        /// <summary>Sunting .pptx di Editor Presentasi; bila berkas ini disimpan ulang, Reader memuat versi terbaru.</summary>
+        private void EditThisPresentation()
+        {
+            var before = File.Exists(_filePath) ? File.GetLastWriteTimeUtc(_filePath) : default;
+            string? saved;
+            using (var editor = new SlideEditorForm(_filePath))
+            {
+                editor.ShowDialog(DlgOwner);
+                saved = editor.SavedPath;
+            }
+            if (File.Exists(_filePath) && File.GetLastWriteTimeUtc(_filePath) != before)
+            {
+                var old = _pagedDocument;
+                _pagedDocument = null;
+                ClearStage();
+                old?.Dispose();
+                _ = OpenPagesAsync();
+            }
+            else if (saved != null && !string.Equals(saved, _filePath, StringComparison.OrdinalIgnoreCase))
+                Theme.Toast(DlgOwner, $"Tersimpan sebagai salinan: {Path.GetFileName(saved)}");
         }
 
         private void EditThisPdf()

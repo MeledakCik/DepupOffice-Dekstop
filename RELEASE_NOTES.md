@@ -3,6 +3,10 @@
 Tampilan kini sama dengan DepUp Office Android.
 
 ## Baru
+- **Editor Presentasi (ala WPS / PowerPoint)**: buat & sunting `.pptx` langsung di PC. Daftar slide di kiri, kanvas di tengah;
+  teks, gambar (pilih, seret, atau tempel Ctrl+V), bentuk, 5 tema, 6 tata letak, warna latar, urungkan/ulangi,
+  putar layar penuh (F5) dan ekspor PDF. Templat *Presentasi Tugas* & *Proposal Usaha*. Berkas terbuka normal di PowerPoint/WPS;
+  `.pptx` dari aplikasi lain bisa disunting dan disimpan sebagai salinan (berkas asli tidak ditimpa).
 - **Ikon sama persis dengan aplikasi HP**: semua ikon memakai desain "Depup Solid" dari Android, tajam di semua ukuran layar.
 - **Ikon aplikasi baru**: logo DepUp biru di taskbar, Explorer, dan semua jendela.
 - **Warna & bentuk seperti Android**: abu batu hangat, biru royal, sudut kartu melengkung halus; tema terang & gelap.

@@ -610,6 +610,13 @@ namespace DepupOfficeDesktop.Forms
         }
 
         // ================= BERANDA (urutan & komponen sama dengan Android MainActivity.buildHome) =================
+        private void OpenSlides(string template)
+        {
+            using var f = new SlideEditorForm(template: template);
+            f.ShowDialog(this);
+            RenderCurrentTab(preserveScroll: true);
+        }
+
         private void BuildHomeTab(FlowLayoutPanel p)
         {
             int w = GetContentWidth();
@@ -690,6 +697,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 Row(CardIcon.Word, Theme.SKY, Theme.SKY_BG, "Dokumen Word", "Halaman kosong, editor ala Word", () => OpenWord(DocEditorForm.TEMPLATE_BLANK)),
                 Row(CardIcon.Excel, Theme.TEAL, Theme.TEAL_BG, "Spreadsheet", "Tabel & rumus seperti Excel", () => OpenSheet(SheetEditorForm.TEMPLATE_BLANK)),
+                Row(CardIcon.ImagePdf, Theme.AMBER, Theme.AMBER_BG, "Presentasi", "Slide seperti PowerPoint, simpan .pptx / PDF", () => OpenSlides(SlideDeck.TEMPLATE_BLANK)),
                 Row(CardIcon.Note, Theme.ACCENT, Theme.BLUE_BG, "Catatan jadi PDF", "Tulis teks, simpan sebagai PDF", QuickTextToPdfDialog),
                 Row(CardIcon.Excel, Theme.TEAL, Theme.TEAL_BG, "Nota & Kuitansi Toko", "Buat kuitansi, hitung total & tempel stempel", InvoiceFlow),
                 Row(CardIcon.Word, Theme.SKY, Theme.SKY_BG, "Katalog Produk & Portofolio", "Buat katalog jualan / portofolio PDF", CatalogFlow),
@@ -1323,8 +1331,19 @@ namespace DepupOfficeDesktop.Forms
             p.Controls.Add(CreateGrid(w, 240,
                 tw => CreateFeatureTile(tw, "Dokumen Word", "Halaman kosong, editor ala Word (A4/Letter/F4)", "", Theme.SKY, Theme.SKY_BG, () => OpenWord(DocEditorForm.TEMPLATE_BLANK)),
                 tw => CreateFeatureTile(tw, "Spreadsheet Excel", "Tabel dengan rumus =SUM, mata uang Rp", "", Theme.TEAL, Theme.TEAL_BG, () => OpenSheet(SheetEditorForm.TEMPLATE_BLANK)),
+                tw => CreateFeatureTile(tw, "Presentasi PowerPoint", "Slide, tema, gambar & bentuk → .pptx / PDF", "Baru", Theme.AMBER, Theme.AMBER_BG, () => OpenSlides(SlideDeck.TEMPLATE_BLANK)),
                 tw => CreateFeatureTile(tw, "PDF dari teks", "Ketik catatan, otomatis jadi PDF A4 rapi", "", Theme.RED, Theme.RED_BG, QuickTextToPdfDialog),
                 tw => CreateFeatureTile(tw, "Edit PDF", "Ubah teks asli, tambah gambar & tanda tangan", "Populer", Theme.ACCENT, Theme.BLUE_BG, StartPdfEditorFlow)));
+
+            p.Controls.Add(CreateSectionHeader("Presentasi", "", w));
+            p.Controls.Add(CreateGrid(w, 240,
+                tw => CreateFeatureTile(tw, "Presentasi Tugas", "Judul, pendahuluan, pembahasan, kesimpulan", "", Theme.AMBER, Theme.AMBER_BG, () => OpenSlides(SlideDeck.TEMPLATE_SCHOOL)),
+                tw => CreateFeatureTile(tw, "Proposal Usaha", "Masalah, solusi, pasar, rencana biaya", "", Theme.AMBER, Theme.AMBER_BG, () => OpenSlides(SlideDeck.TEMPLATE_PITCH)),
+                tw => CreateFeatureTile(tw, "Edit PPTX", "Buka presentasi lalu ubah teks, gambar & slide", "", Theme.AMBER, Theme.AMBER_BG, () =>
+                {
+                    var path = Ui.PickFile(this, "Pilih presentasi", "Presentasi PowerPoint (*.pptx)|*.pptx");
+                    if (path != null) EditDocument(path);
+                })));
 
             p.Controls.Add(CreateSectionHeader("Catatan", "", w));
             p.Controls.Add(CreateGrid(w, 240,

@@ -395,6 +395,11 @@ namespace DepupOfficeDesktop.Forms
                 using var ed = new SheetEditorForm(filePath);
                 ed.ShowDialog(this);
             }
+            else if (ext is ".pptx")
+            {
+                using var ed = new SlideEditorForm(filePath);
+                ed.ShowDialog(this);
+            }
             else
             {
                 OpenDocument(filePath);
