@@ -637,7 +637,7 @@ namespace DepupOfficeDesktop.Controls
             Controls.Add(Input);
         }
 
-        private int IconZone => Theme.S(32);
+        private int IconZone => Theme.S(36);
         private int ShortcutZone => string.IsNullOrEmpty(Shortcut) || Width < Theme.S(238) ? Theme.S(8) : Theme.S(58);
 
         protected override void OnLayout(LayoutEventArgs levent)
@@ -655,13 +655,13 @@ namespace DepupOfficeDesktop.Controls
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
             if (rect.Width <= 0 || rect.Height <= 0) return;
-            using var path = Theme.RoundedRect(rect, Theme.S(8));
+            using var path = Theme.RoundedRect(rect, rect.Height / 2);
             using (var b = new SolidBrush(Theme.SURFACE2)) g.FillPath(b, path);
             using (var pen = new Pen(Input.Focused ? Theme.ACCENT : Theme.LINE, Input.Focused ? 2f : 1f))
                 g.DrawPath(pen, path);
 
             // ikon kaca pembesar
-            float s = Theme.Scale, cx = Theme.S(17), cy = Height / 2f;
+            float s = Theme.Scale, cx = Theme.S(20), cy = Height / 2f;
             using var ip = new Pen(Theme.MUTED, 1.6f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             g.DrawEllipse(ip, cx - 6 * s, cy - 6 * s, 11 * s, 11 * s);
             g.DrawLine(ip, cx + 3.5f * s, cy + 3.5f * s, cx + 7.5f * s, cy + 7.5f * s);
@@ -672,7 +672,7 @@ namespace DepupOfficeDesktop.Controls
                 var f = Theme.FontMono(8f);
                 var sz = TextRenderer.MeasureText(Shortcut, f, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
                 var kr = new Rectangle(Width - Theme.S(12) - sz.Width - Theme.S(12), (Height - sz.Height - Theme.S(8)) / 2, sz.Width + Theme.S(12), sz.Height + Theme.S(8));
-                using var kp = Theme.RoundedRect(kr, Theme.S(4));
+                using var kp = Theme.RoundedRect(kr, kr.Height / 2);
                 using (var kb = new SolidBrush(Theme.SURFACE)) g.FillPath(kb, kp);
                 TextRenderer.DrawText(g, Shortcut, f, kr, Theme.MUTED, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
@@ -1031,6 +1031,8 @@ namespace DepupOfficeDesktop.Controls
         public int AccessoryWidth { get; set; }
         /// <summary>Teks kecil di kanan (mis. ukuran berkas). Kosong = tidak ada.</summary>
         public string Trailing { get; set; } = "";
+        /// <summary>Ikon pin oranye kecil di depan keterangan (Android metaWithPin): berkas disematkan di Beranda.</summary>
+        public bool Pinned { get; set; }
 
         public ListRow()
         {
@@ -1107,7 +1109,16 @@ namespace DepupOfficeDesktop.Controls
             const TextFormatFlags one = TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
             TextRenderer.DrawText(g, Title, fTitle, new Rectangle(tx, ty, tw, th), Theme.TEXT, one);
             if (hasSub)
-                TextRenderer.DrawText(g, Subtitle, fSub, new Rectangle(tx, ty + th, tw, sh), Theme.MUTED, one);
+            {
+                int sx = tx;
+                if (Pinned)
+                {
+                    int pin = Theme.S(13);
+                    DepupIcons.Draw(g, "pin", new RectangleF(tx, ty + th + (sh - pin) / 2f, pin, pin), Theme.PIN);
+                    sx += pin + Theme.S(4);
+                }
+                TextRenderer.DrawText(g, Subtitle, fSub, new Rectangle(sx, ty + th, Math.Max(1, tw - (sx - tx)), sh), Theme.MUTED, one);
+            }
 
             if (Chevron)
             {

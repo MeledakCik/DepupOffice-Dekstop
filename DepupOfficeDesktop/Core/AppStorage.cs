@@ -205,17 +205,17 @@ namespace DepupOfficeDesktop.Core
             if (mime == MIME_PDF || n.EndsWith(".pdf"))
                 return ("PDF", Theme.RED, Theme.RED_BG);
             if (mime.Contains("word") || n.EndsWith(".doc") || n.EndsWith(".docx"))
-                return ("DOCX", Theme.ACCENT, Theme.BLUE_BG);
+                return ("DOCX", Theme.SKY, Theme.SKY_BG);
             if (mime.Contains("sheet") || mime.Contains("excel") || n.EndsWith(".xls") || n.EndsWith(".xlsx") || n.EndsWith(".csv"))
                 return ("XLSX", Theme.TEAL, Theme.TEAL_BG);
             if (n.EndsWith(".pptx"))
                 return ("PPTX", Theme.AMBER, Theme.AMBER_BG);
             if (mime.StartsWith("image/") || n.EndsWith(".jpg") || n.EndsWith(".jpeg") || n.EndsWith(".png"))
-                return ("IMG", Theme.SKY, Theme.SKY_BG);
+                return ("IMG", Theme.INDIGO, Theme.INDIGO_BG);
             string ext = Path.GetExtension(name).TrimStart('.').ToUpperInvariant();
             if (string.IsNullOrEmpty(ext)) ext = "FILE";
             if (ext.Length > 4) ext = ext.Substring(0, 4);
-            return (ext, Theme.INDIGO, Theme.INDIGO_BG);
+            return (ext, Theme.ACCENT, Theme.SURFACE2);   // Android: C.NAVY / C.TINT20
         }
 
         public static string BaseName(string name)

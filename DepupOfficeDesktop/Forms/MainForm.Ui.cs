@@ -118,7 +118,7 @@ namespace DepupOfficeDesktop.Forms
             brand.Controls.Add(logo);
             if (!compact)
             {
-                brand.Controls.Add(L("Depup Office", Theme.FontHead(12f), Theme.TEXT, S(56), S(20)));
+                brand.Controls.Add(L("DEPUP OFFICE", Theme.FontHead(12f), Theme.TEXT, S(56), S(20)));
                 brand.Controls.Add(L("Ruang kerja", Theme.FontHead(9f), Theme.MUTED, S(19), S(72)));
             }
             var nav = new Panel { Dock = DockStyle.Fill, BackColor = sidebarBack, Padding = compact ? new Padding(S(8), 0, S(8), 0) : new Padding(S(11), 0, S(11), 0) };
@@ -616,12 +616,7 @@ namespace DepupOfficeDesktop.Forms
             void OpenWord(string tpl) { using var f = new DocEditorForm(templateKey: tpl); f.ShowDialog(this); RenderCurrentTab(); }
             void OpenSheet(string tpl) { using var f = new SheetEditorForm(templateKey: tpl); f.ShowDialog(this); RenderCurrentTab(); }
 
-            // Kolom cari (membuka tab Dokumen)
-            var search = new CardPanel { Width = w, Height = S(52), CornerRadius = 100, Margin = new Padding(0, S(12), 0, 0), Cursor = Cursors.IBeam };
-            search.Controls.Add(new IconGlyph("search", Theme.MUTED) { Bounds = new Rectangle(S(18), S(16), S(20), S(20)) });
-            search.Controls.Add(L("Cari dokumen…", Theme.FontBody(11f), Theme.MUTED, S(50), S(15), w - S(70), S(24)));
-            search.MakeAction("Cari dokumen", () => { _docsMode = 0; SelectTab(TAB_DOCS); _searchBox.Input.Focus(); });
-            p.Controls.Add(search);
+            // Kolom cari Android ada di bilah atas (selalu tampil, Ctrl+K), jadi tidak diulang di sini.
 
             // Disematkan
             BuildHomePins(p, w);
@@ -871,7 +866,7 @@ namespace DepupOfficeDesktop.Forms
                 card.Controls.Add(L(name, Theme.FontLabel(10f, FontStyle.Bold), Theme.TEXT, S(64), S(14), cw - S(78), S(22), true));
                 string meta = label;
                 try { meta += " • " + AppStorage.FmtSize(new FileInfo(path).Length); } catch { }
-                card.Controls.Add(L("📌 " + meta, Theme.FontBody(9f), Theme.MUTED, S(64), S(38), cw - S(78), S(20), true));
+                card.Controls.Add(L(meta, Theme.FontBody(9f), Theme.MUTED, S(64), S(38), cw - S(78), S(20), true));
                 card.MakeAction(name, () => OpenDocument(path));
                 card.ContextMenuStrip = FileMenu(path);
                 foreach (Control c in card.Controls) c.ContextMenuStrip = card.ContextMenuStrip;
@@ -990,18 +985,22 @@ namespace DepupOfficeDesktop.Forms
                 IconFg = fg,
                 IconBg = bg,
                 Title = e.FileName,
-                Subtitle = (AppStorage.IsPinned(e.FilePath) ? "📌 " : "") + $"{label} • {AppStorage.FmtSize(size)} • {AppStorage.RelTime(timestamp)}",
+                Subtitle = $"{label} • {AppStorage.FmtSize(size)} • {AppStorage.RelTime(timestamp)}",
+                Pinned = AppStorage.IsPinned(e.FilePath),
                 Chevron = !withActions
             };
             row.Click += (s, ev) => OpenDocument(e.FilePath);
             if (!withActions) return row;
 
-            row.AccessoryWidth = S(96);
-            var btnStar = Theme.CreateButton(e.IsBookmarked ? "★" : "☆", false, e.IsBookmarked ? Theme.AMBER_FILL : Theme.TEXT, S(36), S(40));
-            btnStar.Padding = Padding.Empty;
-            btnStar.AccessibleName = e.IsBookmarked ? $"Hapus penanda {e.FileName}" : $"Tandai {e.FileName}";
-            btnStar.BackColor = e.IsBookmarked ? Theme.AMBER_BG : Theme.SURFACE2;
-            btnStar.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            row.AccessoryWidth = S(92);
+            // Android fileRow: iconBtn penanda (ic_bookmark / ic_bookmark_off) + iconBtn ⋮ (ic_more), tanpa latar
+            void StyleStar(IconButton b, bool on)
+            {
+                b.SetIcon(on ? "bookmark" : "bookmark_off", on ? Theme.ACCENT : Theme.MUTED, on ? $"Hapus penanda {e.FileName}" : $"Tandai {e.FileName}");
+                _navTips.SetToolTip(b, on ? "Hapus penanda" : "Tandai");
+            }
+            var btnStar = new IconButton("bookmark_off", Theme.MUTED, "", 22);
+            StyleStar(btnStar, e.IsBookmarked);
             btnStar.Click += async (s, ev) =>
             {
                 btnStar.Enabled = false;
@@ -1011,13 +1010,7 @@ namespace DepupOfficeDesktop.Forms
                     AppStorage.SetBookmark(e.FilePath, bookmarked);
                     e.IsBookmarked = bookmarked;
                     if (_docsMode == 1) ShowHistoryRows();
-                    else if (!btnStar.IsDisposed)
-                    {
-                        btnStar.Text = bookmarked ? "★" : "☆";
-                        btnStar.AccessibleName = bookmarked ? $"Hapus penanda {e.FileName}" : $"Tandai {e.FileName}";
-                        btnStar.BackColor = bookmarked ? Theme.AMBER_BG : Theme.SURFACE2;
-                        btnStar.ForeColor = bookmarked ? Theme.AMBER_FILL : Theme.TEXT;
-                    }
+                    else if (!btnStar.IsDisposed) StyleStar(btnStar, bookmarked);
                 }
                 catch (Exception ex)
                 {
@@ -1025,9 +1018,8 @@ namespace DepupOfficeDesktop.Forms
                 }
                 finally { if (!btnStar.IsDisposed) btnStar.Enabled = true; }
             };
-            var btnMore = Theme.CreateButton("⋯", false, Theme.TEXT, S(36), S(40));
-            btnMore.Padding = Padding.Empty;
-            btnMore.AccessibleName = $"Tindakan untuk {e.FileName}";
+            var btnMore = new IconButton("more", Theme.MUTED, $"Opsi lain untuk {e.FileName}", 22);
+            _navTips.SetToolTip(btnMore, "Opsi lain");
             btnMore.Click += (s, ev) =>
             {
                 var m = new ContextMenuStrip();
@@ -1062,8 +1054,8 @@ namespace DepupOfficeDesktop.Forms
             row.Controls.Add(btnMore);
             void Place()
             {
-                btnMore.Location = new Point(row.Width - S(14) - btnMore.Width, (row.Height - btnMore.Height) / 2);
-                btnStar.Location = new Point(btnMore.Left - S(8) - btnStar.Width, btnMore.Top);
+                btnMore.Location = new Point(row.Width - S(8) - btnMore.Width, (row.Height - btnMore.Height) / 2);
+                btnStar.Location = new Point(btnMore.Left - S(4) - btnStar.Width, btnMore.Top);
             }
             row.Resize += (s, ev) => Place();
             Place();
@@ -1208,14 +1200,14 @@ namespace DepupOfficeDesktop.Forms
                 var row = new ListRow
                 {
                     Icon = IconForFileBadge(label, file.Name), IconFg = fg, IconBg = bg, Title = file.Name,
-                    Subtitle = $"{label}  ·  {AppStorage.FmtSize(file.Length)}  ·  {file.LastWriteTime:dd MMM yyyy, HH:mm}"
+                    Subtitle = $"{label} • {AppStorage.FmtSize(file.Length)} • {file.LastWriteTime:dd MMM yyyy, HH:mm}"
                 };
                 row.Click += (s, e) =>
                 {
                     if (AppStorage.IsSupportedDocument(file.FullName)) OpenDocument(file.FullName);
                     else Process.Start(new ProcessStartInfo(file.FullName) { UseShellExecute = true });
                 };
-                if (AppStorage.IsPinned(file.FullName)) row.Subtitle = "📌 " + row.Subtitle;
+                row.Pinned = AppStorage.IsPinned(file.FullName);
                 row.ContextMenuStrip = FileMenu(file.FullName);
                 return row;
             }).ToList();
@@ -1466,7 +1458,7 @@ namespace DepupOfficeDesktop.Forms
             // ---- Kepala: logo + nama + status offline ----
             var head = new Panel { Width = w, Height = S(96), Margin = new Padding(0, S(20), 0, S(4)) };
             head.Controls.Add(new LogoTile { Size = new Size(S(64), S(64)), Location = new Point(0, S(12)) });
-            head.Controls.Add(L("Depup Office", Theme.FontDisplay(22f), Theme.TEXT, S(80), S(10)));
+            head.Controls.Add(L("DEPUP OFFICE", Theme.FontDisplay(22f), Theme.TEXT, S(80), S(10)));
             head.Controls.Add(new Pill { Text = "100% offline · berkas tidak diunggah", Dot = Theme.SUCCESS, Fg = Theme.SUCCESS, Bg = Theme.SUCCESS_BG, Font = Theme.FontLabel(9f), Location = new Point(S(80), S(52)) });
             p.Controls.Add(head);
 
@@ -1475,8 +1467,9 @@ namespace DepupOfficeDesktop.Forms
                 var col = new Panel { Width = cw };
                 int y = 0;
                 void Add(Control c) { c.Location = new Point(0, y); col.Controls.Add(c); y = c.Bottom; }
+                Control Section(string title) { if (y > 0) y += S(10); var h = CreateSectionHeader(title, "", cw); Add(h); y += S(6); return h; }
 
-                var h1 = CreateSectionHeader("Keamanan", "", cw); Add(h1); y += S(6);
+                Section("Keamanan");
                 Add(CreateListCard(cw, new[]
                 {
                     Row(CardIcon.Lock, Theme.ACCENT, Theme.BLUE_BG, "Brankas pribadi", $"{vaultFiles.Count} berkas · terkunci PIN, AES-256-GCM", () => { using var vf = new VaultForm(); vf.ShowDialog(this); RenderCurrentTab(); }),
@@ -1485,20 +1478,25 @@ namespace DepupOfficeDesktop.Forms
 
                 // Penyimpanan
                 long vaultSize = AppStorage.GetDirectorySize(AppStorage.VaultDir);
-                long outSize = AppStorage.GetDirectorySize(AppStorage.OutDir);
+                long outSize = outFiles.Sum(f => f.Length);   // sama dengan yang dihitung "(n berkas)", tanpa privacy.html bawaan
                 var (free, total) = AppStorage.GetDeviceStorage();
-                var h2 = CreateSectionHeader("Penyimpanan", "", cw); Add(h2); y += S(6);
+                Section("Penyimpanan");
                 var st = new CardPanel { Width = cw, CornerRadius = 22 };
                 st.Controls.Add(L("Dipakai Depup Office", Theme.FontLabel(10.5f), Theme.TEXT, S(20), S(18)));
-                var used = L(AppStorage.FmtSize(vaultSize + outSize), Theme.FontLabel(10.5f), Theme.TEXT, 0, S(18), cw - S(40), S(22));
-                used.Left = S(20); used.TextAlign = ContentAlignment.TopRight;
-                st.Controls.Add(used);
+                Label RightText(string text, Font font, Color color, int top)
+                {
+                    var lbl = L(text, font, color, 0, top);
+                    lbl.Left = cw - S(20) - lbl.PreferredWidth;
+                    lbl.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+                    return lbl;
+                }
+                st.Controls.Add(RightText(AppStorage.FmtSize(vaultSize + outSize), Theme.FontLabel(10.5f), Theme.TEXT, S(18)));
                 st.Controls.Add(new StackedStorageBar
                 {
                     Location = new Point(S(20), S(52)),
                     Size = new Size(cw - S(40), S(10)),
                     TrackColor = Theme.SURFACE2,
-                    Parts = new List<(long, Color)> { (Math.Max(1024, outSize), Theme.ACCENT), (Math.Max(512, vaultSize), Theme.INDIGO) }
+                    Parts = new List<(long, Color)> { (outSize, Theme.ACCENT), (vaultSize, Theme.INDIGO) }   // 0 B = tanpa potongan
                 });
                 int ly = S(76);
                 foreach (var (dot, text, val) in new[]
@@ -1508,10 +1506,9 @@ namespace DepupOfficeDesktop.Forms
                     (Theme.LINE_STRONG, "Sisa ruang PC", $"{AppStorage.FmtGb(free)} dari {AppStorage.FmtGb(total)}")
                 })
                 {
-                    st.Controls.Add(L("●", Theme.FontBody(9f), dot, S(20), ly));
-                    st.Controls.Add(L(text, Theme.FontBody(9.5f), Theme.TEXT, S(38), ly, cw / 2, S(20), true));
-                    var v = L(val, Theme.FontBody(9.5f), Theme.MUTED, S(20), ly, cw - S(40), S(20));
-                    v.TextAlign = ContentAlignment.TopRight;
+                    var v = RightText(val, Theme.FontBody(9.5f), Theme.MUTED, ly);
+                    st.Controls.Add(new DotMark(dot) { Bounds = new Rectangle(S(20), ly + S(5), S(8), S(8)) });
+                    st.Controls.Add(L(text, Theme.FontBody(9.5f), Theme.TEXT, S(36), ly, Math.Max(S(40), v.Left - S(44)), S(20), true));
                     st.Controls.Add(v);
                     ly += S(24);
                 }
@@ -1520,8 +1517,6 @@ namespace DepupOfficeDesktop.Forms
                 bSee.Click += (s, e) => { _docsMode = 2; _docsCat = "Semua"; SelectTab(TAB_DOCS); };
                 st.Controls.Add(bSee);
                 st.Height = bSee.Bottom + S(20);
-                // label kiri ditambahkan sebelum label kanan: urutan z agar teks kiri tidak tertutup
-                foreach (Control c in st.Controls.Cast<Control>().ToList()) if (c is Label lb && lb.TextAlign == ContentAlignment.TopRight) lb.SendToBack();
                 Add(st);
                 col.Height = y;
                 return col;
@@ -1532,9 +1527,10 @@ namespace DepupOfficeDesktop.Forms
                 var col = new Panel { Width = cw };
                 int y = 0;
                 void Add(Control c) { c.Location = new Point(0, y); col.Controls.Add(c); y = c.Bottom; }
+                Control Section(string title) { if (y > 0) y += S(10); var h = CreateSectionHeader(title, "", cw); Add(h); y += S(6); return h; }
 
                 // Tampilan: tema (Ikuti Windows / Terang / Gelap) — sama dengan Android "Ikuti HP / Terang / Gelap"
-                var h1 = CreateSectionHeader("Tampilan", "", cw); Add(h1); y += S(6);
+                Section("Tampilan");
                 var tc = new CardPanel { Width = cw, CornerRadius = 22 };
                 tc.Controls.Add(L("Tema", Theme.FontLabel(10.5f), Theme.TEXT, S(20), S(18)));
                 tc.Controls.Add(L("Mode gelap lebih nyaman di malam hari. \"Ikuti Windows\" mengikuti Pengaturan › Personalisasi › Warna.", Theme.FontBody(9.5f), Theme.MUTED, S(20), S(42), cw - S(40), S(40)));
@@ -1572,7 +1568,7 @@ namespace DepupOfficeDesktop.Forms
                 tc.Height = bMinus.Bottom + S(20);
                 Add(tc);
 
-                var h2 = CreateSectionHeader("Format bawaan", "", cw); Add(h2); y += S(6);
+                Section("Format bawaan");
                 Add(CreateListCard(cw, new[]
                 {
                     Row(CardIcon.Word, Theme.SKY, Theme.SKY_BG, "Dokumen Word", "Ukuran kertas, margin, spasi, dan jenis huruf", ShowWordDefaults),
@@ -1580,7 +1576,7 @@ namespace DepupOfficeDesktop.Forms
                     Row(CardIcon.Pdf, Theme.RED, Theme.RED_BG, "Pembaca PDF", $"{GetReaderThemeName(AppStorage.Config.PdfReaderTheme)} · Zoom awal {AppStorage.Config.PdfDefaultZoom:P0}", ShowPdfDefaults),
                 }));
 
-                var h3 = CreateSectionHeader("Dukungan", "", cw); Add(h3); y += S(6);
+                Section("Dukungan");
                 Add(CreateListCard(cw, new[]
                 {
                     Row(CardIcon.Heart, Theme.ERROR, Theme.ERROR_BG, "Dukung developer", "Donasi sukarela — semua fitur tetap gratis", ShowDonationDialog),

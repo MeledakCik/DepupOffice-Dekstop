@@ -34,6 +34,66 @@ namespace DepupOfficeDesktop.Controls
         protected override void OnPaint(PaintEventArgs e) => DepupIcons.Draw(e.Graphics, _icon, ClientRectangle, _color);
     }
 
+    /// <summary>Titik warna legenda (bulat penuh, bukan karakter "●" yang bergantung font).</summary>
+    public sealed class DotMark : PaintedControl
+    {
+        private readonly Color _color;
+        public DotMark(Color color) { _color = color; TabStop = false; }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var b = new SolidBrush(_color);
+            e.Graphics.FillEllipse(b, 0, 0, Width - 1, Height - 1);
+        }
+    }
+
+    /// <summary>
+    /// Tombol ikon bulat (Android iconBtn): hanya ikon, lingkaran lembut saat disorot/ditekan, cincin fokus keyboard.
+    /// Label wajib lewat <see cref="Control.AccessibleName"/> (dibacakan pembaca layar &amp; dipakai sebagai tooltip).
+    /// </summary>
+    public sealed class IconButton : PaintedControl
+    {
+        private string _icon;
+        private Color _color;
+        private readonly int _glyph;
+
+        public IconButton(string icon, Color color, string label, int glyph = 20)
+        {
+            _icon = icon; _color = color; _glyph = glyph;
+            AccessibleName = label; AccessibleRole = AccessibleRole.PushButton;
+            Cursor = Cursors.Hand; TabStop = true;
+            Size = new Size(S(40), S(40));
+        }
+
+        public void SetIcon(string icon, Color color, string label)
+        {
+            _icon = icon; _color = color; AccessibleName = label;
+            Invalidate();
+        }
+
+        protected override bool IsInputKey(Keys k) => k is Keys.Enter or Keys.Space || base.IsInputKey(k);
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode is Keys.Enter or Keys.Space) { e.SuppressKeyPress = true; OnClick(EventArgs.Empty); return; }
+            base.OnKeyDown(e);
+        }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var r = new Rectangle(0, 0, Width - 1, Height - 1);
+            if (Hot || Down)
+                using (var b = new SolidBrush(Down ? Theme.SURFACE3 : Theme.SURFACE2)) g.FillEllipse(b, r);
+            if (Focused && ShowFocusCues)
+                using (var p = new Pen(Theme.ACCENT, Math.Max(1.5f, 2f * Theme.Scale))) g.DrawEllipse(p, Rectangle.Inflate(r, -1, -1));
+            int ic = S(_glyph);
+            DepupIcons.Draw(g, _icon, new RectangleF((Width - ic) / 2f, (Height - ic) / 2f, ic, ic), Enabled ? _color : Theme.LINE_STRONG);
+        }
+    }
+
     /// <summary>Tombol pil putih di atas panel biru (Android heroBtn): ikon + label berwarna biru.</summary>
     public sealed class HeroButton : PaintedControl
     {

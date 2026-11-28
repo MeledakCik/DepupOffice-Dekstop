@@ -200,7 +200,7 @@ namespace DepupOfficeDesktop.Forms
             using var f = new Form
             {
                 FormBorderStyle = FormBorderStyle.FixedDialog, ControlBox = false, StartPosition = FormStartPosition.CenterParent,
-                ClientSize = new Size(S(420), S(118)), BackColor = Theme.SURFACE, ShowInTaskbar = false, Text = "Depup Office", AutoScaleMode = AutoScaleMode.None
+                ClientSize = new Size(S(420), S(118)), BackColor = Theme.SURFACE, ShowInTaskbar = false, Text = "DEPUP OFFICE", AutoScaleMode = AutoScaleMode.None
             };
             var lbl = new Label { UseMnemonic = false, Text = message, Font = Theme.FontLabel(10f), ForeColor = Theme.TEXT, Location = new Point(S(20), S(18)), Size = new Size(S(380), S(24)), AutoEllipsis = true };
             var bar = new ProgressBar { Location = new Point(S(20), S(52)), Size = new Size(S(380), S(16)), Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30 };
@@ -261,7 +261,7 @@ namespace DepupOfficeDesktop.Forms
                 OutOfMemoryException => "Memori tidak cukup untuk berkas sebesar ini.",
                 _ => ex.Message
             };
-            MessageBox.Show(owner, msg, "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(owner, msg, "DEPUP OFFICE", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         /// <summary>Pratinjau gambar dengan tombol aksi opsional.</summary>

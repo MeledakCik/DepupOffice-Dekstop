@@ -259,7 +259,7 @@ namespace DepupOfficeDesktop.Forms
             {
                 _openingDocument = true;
                 try { await OpenProtectedDocumentAsync(filePath); }
-                catch (Exception ex) { MessageBox.Show(this, $"Dokumen terlindungi tidak dapat dibuka:\n{ex.Message}", "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                catch (Exception ex) { MessageBox.Show(this, $"Dokumen terlindungi tidak dapat dibuka:\n{ex.Message}", "DEPUP OFFICE", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 finally { _openingDocument = false; _lastActionTick = Environment.TickCount64; }
                 if (!IsDisposed && !Disposing) RenderCurrentTab();
                 return;
@@ -276,7 +276,7 @@ namespace DepupOfficeDesktop.Forms
                 if (!IsDisposed && !Disposing)
                 {
                     CloseEmbeddedViewer();
-                    MessageBox.Show(this, $"Berkas tidak dapat dibuka:\n{Path.GetFileName(filePath)}\n\n{ex.Message}", "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(this, $"Berkas tidak dapat dibuka:\n{Path.GetFileName(filePath)}\n\n{ex.Message}", "DEPUP OFFICE", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
             finally

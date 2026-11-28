@@ -20,7 +20,7 @@ namespace DepupOfficeDesktop
                 try
                 {
                     MessageBox.Show($"Terjadi kesalahan dan proses dibatalkan:\n\n{e.Exception.Message}",
-                        "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        "DEPUP OFFICE", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 catch { }
             };
@@ -39,9 +39,9 @@ namespace DepupOfficeDesktop
             if (args.Length > 0)
             {
                 if (!File.Exists(args[0]))
-                    MessageBox.Show($"Berkas tidak ditemukan:\n{args[0]}", "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show($"Berkas tidak ditemukan:\n{args[0]}", "DEPUP OFFICE", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 else if (!AppStorage.IsSupportedDocument(args[0]))
-                    MessageBox.Show(AppStorage.UnsupportedDocumentMessage(args[0]), "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(AppStorage.UnsupportedDocumentMessage(args[0]), "DEPUP OFFICE", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 else
                     initialFile = args[0];
             }

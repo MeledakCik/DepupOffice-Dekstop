@@ -71,6 +71,16 @@ public sealed class ScreenshotTests
                         f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height));
                         bmp.Save(Path.Combine(dir, $"tab{tab}_{tag}.png"), ImageFormat.Png);
                     }
+                    // jendela sempit (dibagi dua layar / laptop kecil): navigasi ringkas & tata letak bertumpuk
+                    f.Size = new Size(820, 720);
+                    for (int tab = 0; tab < 5; tab++)
+                    {
+                        select.Invoke(f, new object[] { tab, true });
+                        for (int k = 0; k < 30; k++) { Application.DoEvents(); Thread.Sleep(20); }
+                        using var bmp = new Bitmap(f.Width, f.Height);
+                        f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height));
+                        bmp.Save(Path.Combine(dir, $"sempit_tab{tab}_{tag}.png"), ImageFormat.Png);
+                    }
                     f.Close();
                 }
                 using (var nf = new NotesForm { Size = new Size(980, 720) })

@@ -137,6 +137,7 @@ namespace DepupOfficeDesktop.Core
         public static Color SOFT => T("#F3F2EE", "#242422");
         public static Color FIELD => SURFACE;
         public static Color LINE => T("#E4E2DD", "#2C2C29");
+        public static Color PIN => T("#B85E00", "#FF9F0A");          // Android pinColor (SwipeRow.ORANGE)
         public static Color LINE_STRONG => T("#84817B", "#6F6D68");
         /// <summary>Kanvas di sekeliling halaman dokumen (Android: TRACK/CANVAS = SURFACE3).</summary>
         public static Color CANVAS => T("#DCD9D3", "#34342F");
@@ -410,7 +411,7 @@ namespace DepupOfficeDesktop.Core
             }
             else
             {
-                MessageBox.Show(message, "Depup Office", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(message, "DEPUP OFFICE", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 
